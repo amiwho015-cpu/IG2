@@ -1,51 +1,121 @@
 "use strict";
 
-const { resolveUserTarget, resolveProfile } = require("../src/utils");
-function number(value) {
-	return value == null ? "—" : Number(value).toLocaleString("en-US");
+/**
+ * info — all Instagram information of a user (ported from Insta-Bot3).
+ * Put this file in /commands/info.js
+ *
+ *   info                    your own info
+ *   info @tag               tagged people
+ *   info <username|link>    a username or profile link
+ *   (reply to a message)    info of that message's sender
+ */
+
+const { resolveUserTarget } = require("../src/utils");
+
+function formatBlock(u) {
+	const raw = u.raw || {};
+	const line = (k, v) => v === undefined || v === null || v === "" || v === false ? null : `│ ${k}: ${v}`;
+	const bool = v => v ? "Yes" : "No";
+	const lines = [
+		"╭─ 👤 INSTAGRAM INFO ─",
+		line("Username", u.username),
+		line("Name", u.name),
+		line("First name", u.firstName),
+		line("User ID", u.id || u.userID),
+		line("Followers", u.followerCount),
+		line("Following", u.followingCount),
+		line("Posts", u.mediaCount),
+		line("Private", bool(u.isPrivate)),
+		line("Verified", bool(u.isVerified)),
+		line("Business", bool(u.isBusiness)),
+		line("Category", raw.category_name || raw.category),
+		line("Friendship", u.isFriend ? "Following" : "Not following"),
+		line("Biography", String(u.biography || "").replace(/\n/g, " ").trim()),
+		line("External URL", u.externalUrl),
+		line("fbid", raw.fbid_v2 || raw.fbid),
+		line("Interop fbid", raw.interop_messaging_user_fbid),
+		line("Strong ID", raw.strong_id__),
+		"╰─────────────────────"
+	];
+	return lines.filter(Boolean).join("\n");
 }
 
 module.exports = {
 	config: {
 		name: "info",
-		aliases: ["whois", "userinfo", "profile"],
+		aliases: ["userinfo", "iginfo2"],
 		author: "Neoaz 🐊",
 		category: "info",
-		cooldown: 3,
+		cooldown: 5,
 		role: 0,
-		description: { en: "Show an Instagram user's profile details" },
-		usage: { en: "{p}info [userID | @handle | username | profile URL] — or reply to a message" }
+		description: { en: "View all Instagram information of a user" },
+		usage: { en: "{p}info [@tag | username | profile link] — or reply to a message" }
 	},
 
-	onStart: async function ({ message, args, event, api }) {
-		const target = await resolveUserTarget(args, event, api);
-		if (!target.id) {
-			if (target.rateLimited) return message.reply("Instagram is rate-limiting lookups right now. Please try again in a few minutes.");
-			if (target.username) return message.reply(`Could not find @${target.username}.`);
-			return message.reply("Provide a numeric user id or @mention, or reply to a user's message.");
+	onStart: async function ({ api, message, event, args }) {
+		const targets = [];
+
+		if (event.messageReply) {
+			targets.push({ id: event.messageReply.senderID });
+		}
+		else if (!args[0]) {
+			targets.push({ id: event.senderID });
+		}
+		else {
+			const mentions = event.mentions;
+			if (mentions && Object.keys(mentions).length) {
+				for (const id of Object.keys(mentions))
+					targets.push({ id, label: String(mentions[id] || "").replace(/^@/, "") });
+			}
+			else {
+				for (const arg of args) {
+					try {
+						const t = await resolveUserTarget([arg], event, api);
+						if (t && t.id) targets.push({ id: t.id, label: arg });
+						else if (t && t.rateLimited) targets.push({ error: "Instagram rate-limit korse, kichukkhon pore try koro.", label: arg });
+						else targets.push({ error: "user paoa jay nai", label: arg });
+					}
+					catch (e) {
+						targets.push({ error: e.message || String(e), label: arg });
+					}
+				}
+			}
 		}
 
-		const profile = await resolveProfile(args, event, api);
-		if (!profile) return message.reply(`Could not find user ${target.id}.`);
-		if (profile.rateLimited && !profile.username && !profile.name)
-			return message.reply("Instagram is rate-limiting lookups right now. Please try again in a few minutes.");
+		const ids = targets.filter(t => t.id).map(t => String(t.id));
+		let infoMap = {};
+		if (ids.length) {
+			try {
+				infoMap = await api.getUserInfo(ids) || {};
+			}
+			catch (e) {
+				return message.reply(`❌ An error occurred while fetching information: ${e.error || e.message || String(e)}`);
+			}
+		}
 
-		const badges = [profile.isVerified ? "✅ Verified" : null, profile.isPrivate ? "🔒 Private" : "🌐 Public"]
-			.filter(Boolean).join(" · ");
+		const blocks = [];
+		let firstPic = null;
+		for (const t of targets) {
+			if (t.error) {
+				blocks.push(`⚠️ ${t.label}: ${t.error}`);
+			}
+			else if (!infoMap[t.id]) {
+				blocks.push("❌ Could not find Instagram information for this user" + (t.label ? ` (${t.label})` : ""));
+			}
+			else {
+				const u = infoMap[t.id];
+				if (!firstPic && u.thumbSrc) firstPic = u.thumbSrc;
+				blocks.push(formatBlock(u));
+			}
+		}
 
-		const lines = [
-			`👤 ${profile.name || profile.username || target.id}`,
-			`@${profile.username || "—"}`,
-			`🆔 ${profile.userID || target.id}`,
-			badges,
-			`👥 Followers: ${number(profile.followers)}`,
-			`➡️ Following: ${number(profile.following)}`,
-			profile.posts != null ? `🖼️ Posts: ${number(profile.posts)}` : null,
-			profile.biography ? `\n📝 ${profile.biography}` : null
-		].filter(Boolean);
-
-		const picture = profile.profilePicture;
-		if (picture) return message.reply({ attachment: picture, body: lines.join("\n"), textFirst: true });
-		return message.reply(lines.join("\n"));
+		const body = blocks.join("\n\n") || "❌ Could not find Instagram information for this user";
+		if (!firstPic) return message.reply(body);
+		try {
+			return await message.reply({ body, attachment: firstPic, textFirst: true });
+		}
+		catch (_) {
+			return message.reply(body);
+		}
 	}
 };
