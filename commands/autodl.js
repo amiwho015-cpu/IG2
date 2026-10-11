@@ -313,16 +313,10 @@ module.exports = {
 
     let filePath = null;
 
+    // React on the message that held the link (⏳ working, ✅ done, ❌ failed).
     const react = emoji => {
       try {
-        if (typeof api.setMessageReaction === "function") {
-          api.setMessageReaction(
-            emoji,
-            messageID,
-            () => {},
-            true
-          );
-        }
+        Promise.resolve(message.react(emoji, messageID)).catch(() => {});
       } catch {}
     };
 
@@ -603,39 +597,18 @@ module.exports = {
         );
       }
 
-      const elapsed =
-        (
-          (Date.now() - start) /
-          1000
-        ).toFixed(2);
-
-      const shortTitle =
-        cleanText(title);
-
-      const mediaType =
-        isAudio
-          ? "🎵 AUDIO"
-          : "🎬 VIDEO";
-
-      const caption =
-`🎬 DOWNLOAD COMPLETE 🎬
-────────────────────
-🔻 TITLE — ${shortTitle}
-🔻 PLATFORM — ${String(platform).toUpperCase()}
-🔻 FILE — ${mediaType}
-🔻 QUALITY — ${quality}
-🔻 SIZE — ${formatSize(stats.size)}
-🔻 TIME — ${elapsed}s
-────────────────────
-⚙️ POWERED BY CRX SHIHAB`;
-
-      await message.reply({
-        body: caption,
-        attachment:
-          fs.createReadStream(
-            filePath
-          )
-      });
+      // Video only: no caption, no info text — just the media.
+      try {
+        await message.reply({
+          attachment:
+            fs.createReadStream(
+              filePath
+            )
+        });
+      } catch (sendError) {
+        console.error("[ALLDL SEND ERROR]", sendError.message);
+        throw sendError;
+      }
 
       await fs.remove(
         filePath

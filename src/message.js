@@ -74,9 +74,19 @@ function createMessageContext({ api, event, log }) {
 					// own plain message (the documented way to caption a video).
 					if (kind === "video") {
 						const videoReply = current === 0 ? replyTarget : undefined;
-						return toSendableVideo(source).then(video => api.sendVideo(video, threadID, (error, result) => {
+						const afterVideo = (error, result) => {
 							if (error || !caption) return done(error, result);
 							api.sendMessage({ body: caption }, threadID, () => done(null, result), videoReply);
+						};
+						return toSendableVideo(source).then(video => api.sendVideo(video, threadID, (error, result) => {
+							// Some ig-chat-api-server builds fail video uploads with a
+							// server-side "caption is not defined". Retry once with the
+							// caption slot filled (the sendImage-style signature).
+							if (error && /caption is not defined/i.test(String(error.message || error))) {
+								log.warn("VIDEO", "server said 'caption is not defined', retrying with an empty caption");
+								return api.sendVideo(video, threadID, "", afterVideo, videoReply);
+							}
+							return afterVideo(error, result);
 						}, videoReply)).catch(error => reject(error));
 					}
 					if (kind === "audio") {

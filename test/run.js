@@ -534,6 +534,30 @@ async function main() {
 		await assert.rejects(() => g.pickPartner(usersData, "5", ["1"], null), /can't tell/);
 	});
 
+	await test("hdpic: reads image size and prefers the biggest picture", async () => {
+		const { imageSize, upsizedVariants } = require(path.join(root, "src/hdpic"));
+		const png = Buffer.alloc(24); png[0] = 0x89; png[1] = 0x50; png.writeUInt32BE(1080, 16); png.writeUInt32BE(1080, 20);
+		assert.deepStrictEqual(imageSize(png), { width: 1080, height: 1080 });
+		assert.deepStrictEqual(upsizedVariants("https://x.cdn/v/t51/s150x150/a.jpg?_nc=1"), ["https://x.cdn/v/t51/a.jpg?_nc=1"]);
+	});
+
+	await test("message: video upload retries when the server says 'caption is not defined'", async () => {
+		let attempts = 0;
+		const api = fakeApi({
+			sendVideo: (...args) => {
+				attempts++;
+				const cb = args.find(a => typeof a === "function");
+				if (attempts === 1) return cb(new Error("caption is not defined"));
+				api.calls.push({ method: "sendVideo", threadID: args[1], retried: args[2] === "" });
+				cb(null, {});
+			}
+		});
+		const message = createMessageContext({ api, event: { threadID: "t", messageID: "e" }, log });
+		await message.reply({ attachment: { _readableState: {}, path: "c.mp4" } });
+		assert.strictEqual(attempts, 2);
+		assert.ok(api.calls.some(c => c.method === "sendVideo" && c.retried));
+	});
+
 	await test("dispatcher: reply handler is invoked", async () => {
 		const api = fakeApi();
 		const config = makeConfig();

@@ -3,6 +3,13 @@
 const API_BASE = "https://alldl.neokex.xyz/api";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+// Primary source (xalman hub). Its base URL is published in a small JSON file, so
+// it is looked up once and cached; if it fails the older source below is used.
+const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
+const API_KEY = "xalman-hub";
+const DEFAULT_HUB = "https://xalman-apis.vercel.app";
+let hubBase = null;
+
 const MAX_BYTES = Math.max(256 * 1024, Number(process.env.IG_MAX_MEDIA_BYTES) || 5 * 1024 * 1024);
 const MAX_ATTEMPTS = 4;
 
@@ -41,6 +48,26 @@ async function requestJSON(url, timeout = 45000) {
 	finally {
 		clearTimeout(timer);
 	}
+}
+
+async function hubBaseUrl() {
+	if (hubBase) return hubBase;
+	try {
+		const data = await requestJSON(API_CONFIG_URL, 15000);
+		const base = data && data[API_KEY];
+		if (typeof base === "string" && base.trim()) hubBase = base.trim().replace(/\/+$/, "");
+	}
+	catch (_) { /* use the built-in default below */ }
+	if (!hubBase) hubBase = DEFAULT_HUB;
+	return hubBase;
+}
+
+/** Direct video URLs from the xalman hub (already downloadable, no resolve step). */
+async function searchHub(query) {
+	const base = await hubBaseUrl();
+	const payload = await requestJSON(`${base}/api/anisearch?q=${encodeURIComponent(query)}`, 15000);
+	const results = (payload && payload.results) || [];
+	return results.map(item => item && item.video_url).filter(Boolean);
 }
 
 async function searchVideos(query) {
@@ -100,7 +127,7 @@ function describeError(error) {
 module.exports = {
 	config: {
 		name: "anisearch",
-		aliases: ["anivid", "animevid"],
+		aliases: ["anivid", "animevid", "amv", "animesearch"],
 		author: "Neoaz 🐊",
 		category: "media",
 		cooldown: 5,
@@ -116,22 +143,38 @@ module.exports = {
 
 		await react(message, REACT_LOADING);
 
-		let candidates;
+		// Candidates: { url, direct } — direct ones are ready to download, the
+		// others are TikTok page links that must be resolved first.
+		let candidates = [];
+		let hubError = null;
 		try {
-			candidates = await searchVideos(query);
+			candidates = (await searchHub(query)).map(url => ({ url, direct: true }));
+			if (!candidates.length) hubError = new Error("no results");
 		}
-		catch (error) {
-			await react(message, REACT_FAIL);
-			return message.reply(`Could not find a video: ${describeError(error)}`);
+		catch (error) { hubError = error; }
+		if (!candidates.length) {
+			try {
+				candidates = (await searchVideos(query)).map(url => ({ url, direct: false }));
+			}
+			catch (error) {
+				await react(message, REACT_FAIL);
+				return message.reply(`Could not find a video.\n• main source: ${describeError(hubError)}\n• backup source: ${describeError(error)}`);
+			}
+		}
+		for (let i = candidates.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[candidates[i], candidates[j]] = [candidates[j], candidates[i]];
 		}
 
 		let lastError = null;
 		let lastUrl = null;
 		let oversize = 0;
 		let terminal = false;
-		for (const url of candidates.slice(0, MAX_ATTEMPTS)) {
+		for (const candidate of candidates.slice(0, MAX_ATTEMPTS)) {
 			try {
-				const video = await resolveVideo(url);
+				const video = candidate.direct
+					? { title: "🎬 ANIME SEARCH RESULT", url: candidate.url }
+					: await resolveVideo(candidate.url);
 				lastUrl = video.url;
 				const buffer = await fetchVideoBuffer(video.url);
 				await message.reply(String(video.title || "Here is your video.").slice(0, 200));
