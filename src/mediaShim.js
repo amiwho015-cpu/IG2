@@ -167,7 +167,7 @@ function install(api) {
 
 	const added = [];
 	for (const [name, kind] of [["sendImage", "image"], ["sendVideo", "video"], ["sendAudio", "audio"]]) {
-		if (typeof api[name] !== "function") { api[name] = make(kind); added.push(name); }
+		if (typeof api[name] !== "function") { api[name] = make(kind); api[name]._shim = true; added.push(name); }
 	}
 
 	// Safe fallbacks for server-only extras so commands degrade instead of throwing.
@@ -182,8 +182,48 @@ function install(api) {
 	if (typeof api.sendAvatarTextEffect !== "function") {
 		api.sendAvatarTextEffect = (text, threadID, effect, cb) => plain(text, threadID, cb); added.push("sendAvatarTextEffect");
 	}
+	// Different ig-chat-api builds name these differently; alias whatever exists.
+	const alias = (target, candidates) => {
+		if (typeof api[target] === "function") return;
+		const found = candidates.find(n => typeof api[n] === "function");
+		if (found) { api[target] = (...a) => api[found](...a); added.push(`${target}<-${found}`); }
+	};
+	alias("unsendMessage", ["unsend", "deleteMessage", "removeMessage", "unsendMsg", "deleteMessageForEveryone"]);
+	alias("sendTypingIndicator", ["sendTyping", "setTyping", "typing", "startTyping", "indicateTyping"]);
+	alias("setMessageReaction", ["react", "reactToMessage", "sendReaction"]);
+	// unsendMessage must work both as `await api.unsendMessage(id, threadID)` and with a
+	// node-style callback, whichever way the underlying package implements it.
+	if (typeof api.unsendMessage === "function" && !api.unsendMessage._wrapped) {
+		const original = api.unsendMessage.bind(api);
+		const wrapped = (messageID, threadID, cb) => {
+			const p = new Promise((resolve, reject) => {
+				let done = false;
+				const timer = setTimeout(() => fin(new Error("unsend timed out")), 20000);
+				const fin = (error, result) => {
+					if (done) return;
+					done = true;
+					clearTimeout(timer);
+					error ? reject(error) : resolve(result);
+				};
+				try {
+					const ret = original(messageID, threadID, fin);
+					if (ret && typeof ret.then === "function") ret.then(r => fin(null, r), fin);
+				}
+				catch (error) { fin(error); }
+			});
+			if (typeof cb === "function") { p.then(r => cb(null, r), e => cb(e)); return Promise.resolve(); }
+			return p;
+		};
+		wrapped._wrapped = true;
+		api.unsendMessage = wrapped;
+	}
+	else if (typeof api.unsendMessage !== "function") {
+		log.warn("MEDIA", "this ig-chat-api build has no unsend method; unsend commands cannot work");
+	}
 	if (typeof api.sendTypingIndicator !== "function") {
-		api.sendTypingIndicator = (threadID, cb) => { if (typeof cb === "function") cb(null); return () => { }; }; added.push("sendTypingIndicator");
+		api.sendTypingIndicator = (threadID, cb) => { if (typeof cb === "function") cb(null); return () => { }; };
+		api.sendTypingIndicator._noop = true;
+		added.push("sendTypingIndicator(noop)");
 	}
 	if (typeof api.musicSearch !== "function") {
 		api.musicSearch = (query, cb) => {
@@ -195,6 +235,13 @@ function install(api) {
 	}
 
 	if (added.length) log.info("MEDIA", `Direct-mode shim added: ${added.join(", ")}`);
+	try {
+		const names = new Set();
+		for (let o = api; o && o !== Object.prototype; o = Object.getPrototypeOf(o))
+			for (const k of Object.getOwnPropertyNames(o)) if (typeof api[k] === "function") names.add(k);
+		log.info("MEDIA", `api methods: ${[...names].sort().join(", ")}`);
+	}
+	catch (_) { /* diagnostics only */ }
 	return api;
 }
 

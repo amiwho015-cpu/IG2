@@ -19,7 +19,7 @@ module.exports = {
     if (type === "message_reply" && messageReply.senderID === api.getCurrentUserID()) {
       try {
         await api.unsendMessage(event.messageReply.messageID, event.threadID);
-      } catch {}
+      } catch (error) { console.error("[unsent] failed:", error && error.message || error); }
     }
   },
 
@@ -29,7 +29,7 @@ module.exports = {
     if (type === "message_reply" && messageReply?.senderID === api.getCurrentUserID()) {
       try {
         await api.unsendMessage(event.messageReply.messageID, event.threadID);
-      } catch {}
+      } catch (error) { console.error("[unsent] failed:", error && error.message || error); }
     }
   }
 };

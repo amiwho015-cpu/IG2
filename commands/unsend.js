@@ -3,7 +3,7 @@
 module.exports = {
 	config: {
 		name: "unsend",
-		aliases: ["uns", "delete", "del"],
+		aliases: ["delete", "del"],
 		author: "Neoaz 🐊",
 		category: "utility",
 		cooldown: 1,
@@ -24,6 +24,9 @@ module.exports = {
 				api.unsendMessage(target, threadID, (error, result) => error ? reject(error) : resolve(result));
 			});
 		}
-		catch (_) { }
+		catch (error) {
+			const text = String((error && (error.message || error.error)) || error);
+			return message.reply(`❌ Could not unsend: ${text}`.slice(0, 300));
+		}
 	}
 };
