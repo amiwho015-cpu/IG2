@@ -181,6 +181,7 @@ function createBot(config) {
 		return new Promise((resolve, reject) => {
 			const finish = async (error, api) => {
 				if (error) return reject(error);
+				try { require("./mediaShim").install(api); } catch (e) { log.warn("MEDIA", `shim failed: ${e.message}`); }
 				try { require("./autoTyping").install(api, config); } catch (_) { /* cosmetic */ }
 				state.api = api;
 				state.botID = api.getCurrentUserID();

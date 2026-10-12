@@ -10,7 +10,7 @@ const API_KEY = "xalman-hub";
 const DEFAULT_HUB = "https://xalman-apis.vercel.app";
 let hubBase = null;
 
-const MAX_BYTES = Math.max(256 * 1024, Number(process.env.IG_MAX_MEDIA_BYTES) || 5 * 1024 * 1024);
+const MAX_BYTES = Math.max(256 * 1024, Number(process.env.IG_MAX_MEDIA_BYTES) || 40 * 1024 * 1024);
 const MAX_ATTEMPTS = 4;
 
 const REACT_LOADING = "⏳";

@@ -16,7 +16,7 @@ const TMP = path.join(os.tmpdir(), "instabot-audio");
 try { fs.mkdirSync(TMP, { recursive: true }); } catch (_) { /* ignore */ }
 
 const OK_EXT = new Set([".m4a", ".mp4", ".aac"]);
-const MAX_BYTES = 4.5 * 1024 * 1024; // auth.js caps media at 5 MB (base64 grows it)
+const MAX_BYTES = Number(process.env.IG_AUDIO_MAX_BYTES) || 12 * 1024 * 1024;
 
 function ffmpegBin() {
 	try { const p = require("ffmpeg-static"); if (p) return p; } catch (_) { /* use system */ }
@@ -88,7 +88,7 @@ async function toVoiceSource(source, hint = {}) {
 	}
 }
 
-const VIDEO_MAX = 4.3 * 1024 * 1024; // raw bytes; base64 + JSON must stay under the server cap
+const VIDEO_MAX = Number(process.env.IG_VIDEO_MAX_BYTES) || 8 * 1024 * 1024; // larger clips are re-encoded below this
 
 function probeDuration(file) {
 	return new Promise(resolve => {
