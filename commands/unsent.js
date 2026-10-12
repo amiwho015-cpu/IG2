@@ -16,9 +16,10 @@ module.exports = {
 
     if (!triggers.includes(body?.toLowerCase())) return;
 
-    if (type === "message_reply" && messageReply.senderID === api.getCurrentUserID()) {
+    if (type === "message_reply" && messageReply && messageReply.messageID) {
       try {
         await api.unsendMessage(event.messageReply.messageID, event.threadID);
+        console.log("[unsent] ok", event.messageReply.messageID);
       } catch (error) { console.error("[unsent] failed:", error && error.message || error); }
     }
   },
@@ -26,9 +27,10 @@ module.exports = {
   onStart: async function ({ api, event }) {
     const { messageReply, type } = event;
 
-    if (type === "message_reply" && messageReply?.senderID === api.getCurrentUserID()) {
+    if (type === "message_reply" && messageReply?.messageID) {
       try {
         await api.unsendMessage(event.messageReply.messageID, event.threadID);
+        console.log("[unsent] ok", event.messageReply.messageID);
       } catch (error) { console.error("[unsent] failed:", error && error.message || error); }
     }
   }

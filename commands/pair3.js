@@ -3,6 +3,7 @@ const { pickPartner } = require("../src/gender");
 const Canvas = require("canvas");
 const fs = require("fs");
 const path = require("path");
+const { safeLoadImage, safeLoadBackground, safeThreadInfo } = require("../src/pairUtil");
 
 module.exports = {
   config: {
@@ -36,7 +37,7 @@ module.exports = {
 
       const [senderData, threadInfo] = await Promise.all([
         usersData.get(targetID),
-        api.getThreadInfo(threadID)
+        safeThreadInfo(api, threadID, event)
       ]);
 
       const senderName = targetName || senderData.name || "User";
@@ -118,13 +119,7 @@ module.exports = {
       const avt1 = await usersData.getAvatarUrl(targetID);
       const avt2 = await usersData.getAvatarUrl(partner.id);
 
-      async function loadImage(url) {
-        const response = await axios.get(url, {
-          responseType: "arraybuffer",
-          headers: { "User-Agent": "Mozilla/5.0" }
-        });
-        return await Canvas.loadImage(response.data);
-      }
+      const loadImage = url => safeLoadImage(Canvas, axios, url);
 
       const [img1, img2] = await Promise.all([loadImage(avt1), loadImage(avt2)]);
 
@@ -287,7 +282,7 @@ ${genderEmoji1} ${senderName} ✦ ${genderEmoji2} ${partner.name}
 📊 ${match}% ${compatibility} Match
 💘 Status: Matched!`;
 
-      return api.sendMessage(
+      return await api.sendMessage(
         {
           body: msg,
           attachment: fs.createReadStream(filePath)
@@ -304,8 +299,8 @@ ${genderEmoji1} ${senderName} ✦ ${genderEmoji2} ${partner.name}
       );
 
     } catch (err) {
-      console.log(err);
-      return api.sendMessage("❌ | Pair system failed! Please try again.", threadID, messageID);
+      console.error("[pair] failed:", err && err.stack || err);
+      return api.sendMessage(`❌ | Pair system failed: ${String((err && err.message) || err).slice(0, 200)}`, threadID, messageID);
     }
   }
 };
