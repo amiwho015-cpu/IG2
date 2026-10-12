@@ -107,6 +107,16 @@ function loadConfig() {
 	// / IG_BOT_ID is ignored.
 	delete config.server.botId;
 	config.server.timeout = Number(config.server.timeout) || 60000;
+	// "direct" = log in with the local ig-chat-api package (like Insta-Bot3);
+	// anything else = use the hosted server above. IG_MODE overrides the file.
+	const modeEnv = process.env.IG_MODE && process.env.IG_MODE.trim().toLowerCase();
+	config.server.mode = modeEnv === "direct" || modeEnv === "server" ? modeEnv : (config.server.mode === "direct" ? "direct" : "server");
+	config.optionsFca = config.optionsFca && typeof config.optionsFca === "object" ? config.optionsFca : {};
+
+	// Typing indicator shown before the bot sends anything (toggle: `typingindicator`).
+	config.typingIndicator = config.typingIndicator || {};
+	if (config.typingIndicator.enable == null) config.typingIndicator.enable = true;
+	if (!(Number(config.typingIndicator.duration) > 0)) config.typingIndicator.duration = 1000;
 
 	// Welcome / leave announcements for group threads.
 	config.welcome = config.welcome || {};

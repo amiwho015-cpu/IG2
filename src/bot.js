@@ -38,17 +38,23 @@ function loadServerCookies() {
  */
 function resolveLogin(config) {
 	const server = config.server || {};
-	if (server.url && server.token) return { login: serverLogin, mode: "server" };
-	try {
-		return { login: require("ig-chat-api"), mode: "direct" };
+	const wantDirect = server.mode === "direct";
+	if (!wantDirect && server.url && server.token) return { login: serverLogin, mode: "server" };
+	// Direct mode (same as Insta-Bot3): talk to Instagram through the locally
+	// installed ig-chat-api package. Bot3's package is tried first.
+	for (const name of ["@lazyneoaz/ig-chat-api", "ig-chat-api"]) {
+		try {
+			const mod = require(name);
+			const login = typeof mod === "function" ? mod : (mod && (mod.login || mod.default));
+			if (typeof login === "function") return { login, mode: "direct" };
+		}
+		catch (_) { /* try the next package */ }
 	}
-	catch (error) {
-		throw new Error(
-			"No server configured and the direct 'ig-chat-api' package is not installed.\n" +
-			"Recommended: set server.url + server.token in config.json (or IG_API_SERVER / IG_API_TOKEN).\n" +
-			"Mode B (development): install ig-chat-api into node_modules and place cookies in account.txt."
-		);
-	}
+	throw new Error(
+		"Direct mode needs the ig-chat-api package, but it is not installed.\n" +
+		"Run: npm install @lazyneoaz/ig-chat-api   (cookies go in account.txt)\n" +
+		"Or set server.mode to \"server\" and give server.url + server.token in config.json."
+	);
 }
 
 /**
@@ -175,6 +181,7 @@ function createBot(config) {
 		return new Promise((resolve, reject) => {
 			const finish = async (error, api) => {
 				if (error) return reject(error);
+				try { require("./autoTyping").install(api, config); } catch (_) { /* cosmetic */ }
 				state.api = api;
 				state.botID = api.getCurrentUserID();
 				dispatcher = createDispatcher({ api, config, registry, database });
@@ -225,6 +232,10 @@ function createBot(config) {
 			autoReconnect: config.autoReconnect,
 			logLevel: "silent"
 		};
+		// Extra ig-chat-api options (minRequestInterval, keepAliveInterval, ...), as in Insta-Bot3.
+		const extra = config.optionsFca && typeof config.optionsFca === "object" ? config.optionsFca : {};
+		for (const [key, value] of Object.entries(extra))
+			if (key !== "notes" && key !== "logLevel" && value !== null && value !== undefined) options[key] = value;
 		if (config.account && config.account.proxy) options.proxy = config.account.proxy;
 		if (config.account && config.account.userAgent) options.userAgent = config.account.userAgent;
 		return options;

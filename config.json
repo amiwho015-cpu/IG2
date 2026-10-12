@@ -2,7 +2,9 @@
   "botName": "InstaBOT",
   "prefix": "-",
   "language": "en",
-  "adminBot": ["76593286314"],
+  "adminBot": [
+    "76593286314"
+  ],
   "nickNameOnStart": "InstaBOT",
   "env": {
     "token": "chat.api.toke.neokex.ica.token.can.change.a9y.2ime.ok",
@@ -13,7 +15,8 @@
     "url": "https://nkx-ica.neokex.xyz",
     "token": "chat.api.toke.neokex.ica.token.can.change.a9y.2ime.ok",
     "timeout": 60000,
-    "notes": "The shared ig-chat-api-server. url + token are the SAME for every bot and are intentionally global: one server hosts many accounts. Each bot is identified by the Instagram account id (ds_user_id) inside its own cookies, which it pushes to the server; the server returns that id and the bot adopts it. There is no per-bot id and no per-bot token. Point these at your own server instead only if you run a separate deployment (IG_API_SERVER / IG_API_TOKEN override whatever is here)."
+    "mode": "direct",
+    "notes": "The shared ig-chat-api-server. url + token are the SAME for every bot and are intentionally global: one server hosts many accounts. Each bot is identified by the Instagram account id (ds_user_id) inside its own cookies, which it pushes to the server; the server returns that id and the bot adopts it. There is no per-bot id and no per-bot token. Point these at your own server instead only if you run a separate deployment (IG_API_SERVER / IG_API_TOKEN override whatever is here). server.mode: \"direct\" logs in through the local @lazyneoaz/ig-chat-api package (like Insta-Bot3) and ignores url/token; set \"server\" (or IG_MODE=server) to use the hosted server again."
   },
   "account": {
     "proxy": null,
@@ -84,5 +87,16 @@
     "dir": "data",
     "autoRefreshThreadInfo": true,
     "notes": "Simple JSON storage for users and threads. Files are created automatically."
+  },
+  "optionsFca": {
+    "forceLogin": true,
+    "listenEvents": true,
+    "updatePresence": true,
+    "selfListenEvent": true,
+    "autoReconnect": true,
+    "minRequestInterval": 350,
+    "keepAliveInterval": 240000,
+    "tokenRefreshInterval": 600000,
+    "notes": "Extra options passed to ig-chat-api.login() in direct mode (same values as Insta-Bot3). minRequestInterval (ms) spaces API calls."
   }
 }
