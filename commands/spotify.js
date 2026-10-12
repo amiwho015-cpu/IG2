@@ -34,10 +34,10 @@ const path = require("path");
 // ---- unsend helper: retries + logs errors (old code swallowed them silently) ----
 async function unsendSafe(api, messageID, threadID, label = "msg") {
   if (!messageID) return false;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try { await api.unsendMessage(messageID, threadID); return true; }
     catch (e) {
-      console.log(`[unsend] ${label} failed (try ${attempt}/3):`, e && (e.message || e));
+      console.log(`[unsend] ${label} failed (try ${attempt}/2):`, e && (e.message || e));
       await new Promise(r => setTimeout(r, 1500 * attempt));
     }
   }
@@ -133,7 +133,7 @@ module.exports = {
     const trackUrl = track.url;
 
     if (global.GoatBot && global.GoatBot.onReply) global.GoatBot.onReply.delete(Reply.messageID);
-    await unsendSafe(api, Reply.messageID, threadID, "search-list");
+    unsendSafe(api, Reply.messageID, threadID, "search-list");
 
     api.setMessageReaction("⏳", messageID, () => {}, true);
 
