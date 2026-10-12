@@ -2,6 +2,7 @@ const axios = require('axios');
 const fs = require('fs-extra');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
+const { assignSpots } = require('../src/gender');
 
 module.exports = {
     config: {
@@ -52,8 +53,9 @@ module.exports = {
             ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
 
             let senderPos, mentionPos;
+            const senderIsBoy = await assignSpots(usersData, senderID, mentionID);
 
-            if (senderGender === 2) { 
+            if (senderIsBoy) { 
                 senderPos = { x: 240, y: 190, r: 40 };
                 mentionPos = { x: 320, y: 250, r: 40 };
             } else {

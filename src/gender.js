@@ -70,4 +70,21 @@ async function pickPartner(usersData, targetID, members, wanted) {
 	err.friendly = true; throw err;
 }
 
-module.exports = { guessFromName, resolveGender, pickPartner };
+/**
+ * For couple-image commands (kiss, hug, propose): decide whether the sender
+ * takes the boy's spot (true) or the girl's spot (false) in the template.
+ * Uses the same gender data as pair (manual `gender` setting, then name guess).
+ * The sender's own gender wins; if unknown, the opposite of the target's;
+ * if both unknown, the sender takes the boy's spot.
+ */
+async function assignSpots(usersData, senderID, targetID) {
+	const s = await resolveGender(usersData, String(senderID));
+	if (s.gender === 1) return true;
+	if (s.gender === 2) return false;
+	const t = await resolveGender(usersData, String(targetID));
+	if (t.gender === 1) return false;
+	if (t.gender === 2) return true;
+	return true;
+}
+
+module.exports = { guessFromName, resolveGender, pickPartner, assignSpots };

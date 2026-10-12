@@ -2,6 +2,7 @@ const axios = require('axios');
 const fs = require('fs-extra');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
+const { assignSpots } = require('../src/gender');
 
 module.exports = {
     config: {
@@ -33,7 +34,8 @@ module.exports = {
             const { name: mName } = mentionInfo;
 
             let bgUrl, sP, mP;
-            if (sGender === 1) { 
+            const senderIsBoy = await assignSpots(usersData, senderID, mentionID);
+            if (!senderIsBoy) { 
                 bgUrl = "https://i.ibb.co/HpXZtX2t/fd52b9bc7357.jpg";
                 sP = { x: 335, y: 370, r: 30 }; mP = { x: 185, y: 310, r: 30 };
             } else {
