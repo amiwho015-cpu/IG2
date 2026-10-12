@@ -182,6 +182,7 @@ function createBot(config) {
 			const finish = async (error, api) => {
 				if (error) return reject(error);
 				try { require("./mediaShim").install(api); } catch (e) { log.warn("MEDIA", `shim failed: ${e.message}`); }
+				try { require("./igUnsend").install(api); } catch (e) { log.warn("UNSEND", `unsend compat failed: ${e.message}`); }
 				try { require("./autoTyping").install(api, config); } catch (_) { /* cosmetic */ }
 				state.api = api;
 				state.botID = api.getCurrentUserID();
