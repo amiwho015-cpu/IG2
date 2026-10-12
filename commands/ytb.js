@@ -31,6 +31,25 @@ async function getApiBaseUrl() {
 const fs = require("fs-extra");
 const path = require("path");
 
+// ---- auto-unsend helpers ----
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Unsend with retries and real error logging (the old code swallowed every error silently).
+async function unsendSafe(api, messageID, threadID, label = "msg") {
+  if (!messageID) return false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await api.unsendMessage(messageID, threadID);
+      return true;
+    } catch (e) {
+      console.log(`[ytb] unsend ${label} failed (try ${attempt}/3):`, e && (e.message || e));
+      await sleep(1500 * attempt);
+    }
+  }
+  return false;
+}
+
+
 module.exports = {
   config: {
     name: "ytb",
@@ -128,11 +147,10 @@ module.exports = {
       return api.sendMessage("❌ That result doesn't exist.", threadID, messageID);
     }
     const video = data.results[index];
-    try {
-      if (Reply.searchMessageID) {
-        await api.unsendMessage(Reply.searchMessageID, threadID);
-      }
-    } catch {}
+    const listID = data.searchMessageID || Reply.searchMessageID;
+    data.searchMessageID = null;
+    if (global.GoatBot && global.GoatBot.onReply && listID) global.GoatBot.onReply.delete(listID);
+    unsendSafe(api, listID, threadID, "search-list");
     api.setMessageReaction("⏳", messageID, () => {}, true);
     return downloadMedia(api, threadID, messageID, video.url, data.mode);
   }
@@ -151,7 +169,7 @@ async function sendSearchPage(api, threadID, senderID, page) {
   }
   msg += "💬 Reply with a number (1-5) to select, or 'next'/'prev' to navigate.";
   if (data.searchMessageID) {
-    try { await api.unsendMessage(data.searchMessageID, threadID); } catch {}
+    await unsendSafe(api, data.searchMessageID, threadID, "old-search-page");
   }
   const sent = await api.sendMessage(msg, threadID);
   data.searchMessageID = sent.messageID;
@@ -183,7 +201,7 @@ async function downloadMedia(api, threadID, messageID, url, mode) {
     if (!isSuccess || !data.url) {
       api.setMessageReaction("❌", messageID, () => {}, true);
       if (waitMsg?.messageID) {
-        try { await api.unsendMessage(waitMsg.messageID, threadID); } catch {}
+        await unsendSafe(api, waitMsg.messageID, threadID, "downloading");
       }
       return api.sendMessage("❌ Download failed", threadID, messageID);
     }
@@ -209,13 +227,16 @@ async function downloadMedia(api, threadID, messageID, url, mode) {
 
     writer.on("finish", async () => {
       if (waitMsg?.messageID) {
-        try { await api.unsendMessage(waitMsg.messageID, threadID); } catch {}
+        await unsendSafe(api, waitMsg.messageID, threadID, "downloading");
       }
       api.setMessageReaction("✅", messageID, () => {}, true);
-      await api.sendMessage({
-        body: `╭──〔 DOWNLOAD COMPLETE 〕──╮\n│ 🎵 ${data.title || "Unknown"}\n│ 📦 ${mode.toUpperCase()}\n╰────────────────────╯`,
-        attachment: fs.createReadStream(filePath)
-      }, threadID);
+      // Only the song/video itself stays in the chat (no caption, no "complete" text).
+      try {
+        await api.sendMessage({ body: "", attachment: fs.createReadStream(filePath) }, threadID);
+      } catch (e) {
+        console.log("[ytb] media send failed:", e && e.message);
+        api.sendMessage("❌ Could not send the file", threadID);
+      }
       setTimeout(() => {
         if (fs.existsSync(filePath)) {
           try { fs.unlinkSync(filePath); } catch {}
@@ -226,7 +247,7 @@ async function downloadMedia(api, threadID, messageID, url, mode) {
     writer.on("error", async () => {
       api.setMessageReaction("❌", messageID, () => {}, true);
       if (waitMsg?.messageID) {
-        try { await api.unsendMessage(waitMsg.messageID, threadID); } catch {}
+        await unsendSafe(api, waitMsg.messageID, threadID, "downloading");
       }
       if (fs.existsSync(filePath)) {
         try { fs.unlinkSync(filePath); } catch {}
@@ -237,7 +258,7 @@ async function downloadMedia(api, threadID, messageID, url, mode) {
     console.log(err);
     api.setMessageReaction("❌", messageID, () => {}, true);
     if (waitMsg?.messageID) {
-      try { await api.unsendMessage(waitMsg.messageID, threadID); } catch {}
+      await unsendSafe(api, waitMsg.messageID, threadID, "downloading");
     }
     api.sendMessage("❌ Download failed", threadID, messageID);
   }

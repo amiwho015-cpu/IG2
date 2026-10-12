@@ -31,6 +31,19 @@ async function getApiBaseUrl() {
 const fs = require("fs-extra");
 const path = require("path");
 
+// ---- unsend helper: retries + logs errors (old code swallowed them silently) ----
+async function unsendSafe(api, messageID, threadID, label = "msg") {
+  if (!messageID) return false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try { await api.unsendMessage(messageID, threadID); return true; }
+    catch (e) {
+      console.log(`[unsend] ${label} failed (try ${attempt}/3):`, e && (e.message || e));
+      await new Promise(r => setTimeout(r, 1500 * attempt));
+    }
+  }
+  return false;
+}
+
 module.exports = {
   config: {
     name: "spotify",
@@ -119,9 +132,8 @@ module.exports = {
     const track = Reply.results[index];
     const trackUrl = track.url;
 
-    try {
-      await api.unsendMessage(Reply.messageID, threadID);
-    } catch {}
+    if (global.GoatBot && global.GoatBot.onReply) global.GoatBot.onReply.delete(Reply.messageID);
+    await unsendSafe(api, Reply.messageID, threadID, "search-list");
 
     api.setMessageReaction("⏳", messageID, () => {}, true);
 
@@ -175,10 +187,9 @@ module.exports = {
 
       api.setMessageReaction("✅", messageID, () => {}, true);
 
-      const msg = `🎵 𝗦𝗣𝗢𝗧𝗜𝗙𝗬 𝗦𝗢𝗡𝗚\n━━━━━━━━━━━━━━━━━━\n📌 Title: ${title}\n👤 Artist: ${artist}`;
-
+      // Only the song itself stays in the chat (no caption).
       return api.sendMessage({
-        body: msg,
+        body: "",
         attachment: fs.createReadStream(filePath)
       }, threadID, () => {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
