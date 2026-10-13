@@ -320,7 +320,7 @@ function createBot(config) {
 		}
 		catch (_) { /* ignore */ }
 		if (state.retireListener) clearTimeout(state.retireListener);
-		state.retireListener = setTimeout(() => { state.retireListener = null; startListening(); }, 1000);
+		state.retireListener = setTimeout(() => { state.retireListener = null; startListening(); }, 3000);
 		if (state.retireListener.unref) state.retireListener.unref();
 		log.info("LISTEN", "Listener restarted");
 	}

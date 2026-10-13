@@ -100,10 +100,43 @@ module.exports = {
 		const handleOf = new Map();
 		const cleanEvent = Object.assign({}, event, { messageReply: null });
 
+		// Match @username against the people IN THIS GROUP first (no Instagram lookup needed,
+		// so it works even when Instagram refuses profile searches from the server).
+		let memberMap = null;
+		const getMemberMap = async () => {
+			if (memberMap) return memberMap;
+			memberMap = new Map();
+			try {
+				const info = await api.getThreadInfo(event.threadID);
+				const all = ((info && info.participantIDs) || []).map(String).slice(0, 100);
+				for (let i = 0; i < all.length; i += 8) {
+					await Promise.all(all.slice(i, i + 8).map(async uid => {
+						try {
+							const rec = await usersData.get(uid);
+							const u = rec && rec.username;
+							if (u) memberMap.set(String(u).replace(/^@/, "").toLowerCase(), uid);
+						}
+						catch (_) { /* skip this member */ }
+					}));
+				}
+			}
+			catch (_) { /* fall back to Instagram lookup */ }
+			return memberMap;
+		};
+
 		for (const group of groups) {
 			const ids = (group.ids || []).slice();
 			for (const handle of group.handles) {
 				try {
+					const wantedName = String(handle).replace(/^@/, "").toLowerCase();
+					if (!/^\d+$/.test(wantedName)) {
+						const inGroup = (await getMemberMap()).get(wantedName);
+						if (inGroup) {
+							ids.push(inGroup);
+							handleOf.set(inGroup, handle);
+							continue;
+						}
+					}
 					const found = await resolveUserTarget([handle], cleanEvent, api);
 					if (found && found.id) {
 						// Safety: make sure Instagram really gave us the account that was tagged,
@@ -118,7 +151,7 @@ module.exports = {
 						ids.push(String(found.id));
 						handleOf.set(String(found.id), handle);
 					}
-					else failed.push(handle + (found && found.rateLimited ? " (Instagram busy, try again)" : ""));
+					else failed.push(handle + (found && found.rateLimited ? " (Instagram busy, try again)" : " (not in this group, check the username spelling)"));
 				}
 				catch (_) { failed.push(handle); }
 			}

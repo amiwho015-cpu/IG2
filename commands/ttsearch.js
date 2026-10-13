@@ -29,6 +29,20 @@ async function getApiBaseUrl() {
   return apiConfigRequest;
 }
 
+
+// A bare axios stream has no file name, so the bot used to treat it as a PICTURE.
+// Marking it with an .mp4 name makes it go out as a real video.
+async function getVideoStream(url) {
+  const res = await axios.get(url, {
+    responseType: "stream",
+    timeout: 60000,
+    headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/" }
+  });
+  const stream = res.data;
+  stream.path = "tiktok.mp4";
+  return stream;
+}
+
 module.exports = {
   config: {
     name: "tiktok",
@@ -44,7 +58,6 @@ module.exports = {
 
   onStart: async function ({ api, event, args }) {
     const { threadID, messageID } = event;
-    const API_URL = `${await getApiBaseUrl()}/api/tik`;
 
     if (args.length === 0) {
       return api.sendMessage("╭─❍\n│ Usage: {pn} [query]\n│ List: {pn} [query] -list\n╰───────────⟡", threadID, messageID);
@@ -57,8 +70,24 @@ module.exports = {
 
     api.setMessageReaction("🔍", messageID, () => {}, true);
 
+    // Loading the API address used to sit OUTSIDE any try/catch: if it failed the command
+    // just stayed silent. Now it retries and always answers.
+    let API_URL;
+    for (let attempt = 1; attempt <= 3 && !API_URL; attempt++) {
+      try {
+        API_URL = `${await getApiBaseUrl()}/api/tik`;
+      } catch (e) {
+        console.log(`[tiktok] could not load API address (try ${attempt}/3):`, e && e.message);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
+      }
+    }
+    if (!API_URL) {
+      api.setMessageReaction("❌", messageID, () => {}, true);
+      return api.sendMessage("✕ TikTok API address could not be loaded. Try again in a moment.", threadID, messageID);
+    }
+
     try {
-      const res = await axios.get(`${API_URL}?q=${encodeURIComponent(searchQuery)}`);
+      const res = await axios.get(`${API_URL}?q=${encodeURIComponent(searchQuery)}`, { timeout: 30000 });
       const results = res.data.results;
 
       if (!results || results.length === 0) {
@@ -90,13 +119,14 @@ module.exports = {
       }
 
       api.setMessageReaction("📥", messageID, () => {}, true);
-      const videoStream = (await axios.get(results[0].video_url, { responseType: 'stream' })).data;
+      const videoStream = await getVideoStream(results[0].video_url);
 
       return api.sendMessage({
         attachment: videoStream
       }, threadID, messageID);
 
     } catch (error) {
+      console.log("[tiktok] failed:", error && (error.message || error));
       api.setMessageReaction("❌", messageID, () => {}, true);
       return api.sendMessage("✕ API Error or Timeout!", threadID, messageID);
     }
@@ -117,12 +147,13 @@ module.exports = {
     api.setMessageReaction("📥", messageID, () => {}, true);
 
     try {
-      const videoStream = (await axios.get(results[index].video_url, { responseType: 'stream' })).data;
+      const videoStream = await getVideoStream(results[index].video_url);
       return api.sendMessage({
         body: `❖ 𝗧𝗜𝗞𝗧𝗢𝗞 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗 ❖\n━━━━━━━━━━━━━━━━━━\n📝 Title: ${results[index].title}`,
         attachment: videoStream
       }, threadID, messageID);
     } catch (error) {
+      console.log("[tiktok] download failed:", error && (error.message || error));
       return api.sendMessage("✕ Failed to download video!", threadID, messageID);
     }
   }
