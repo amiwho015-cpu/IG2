@@ -2,6 +2,10 @@ const axios = require("axios");
 
 const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
 const API_KEY = "xalman-hub";
+const DEFAULT_HUB = "https://xalman-apis.vercel.app"; // used if apis.json can't be loaded
+const MAX_BYTES = Math.max(256 * 1024, Number(process.env.IG_MAX_MEDIA_BYTES) || 40 * 1024 * 1024);
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 let apiBaseUrl = null;
 let apiConfigRequest = null;
 
@@ -13,12 +17,13 @@ async function getApiBaseUrl() {
       .get(API_CONFIG_URL, { timeout: 15000 })
       .then(({ data }) => {
         const baseUrl = data?.[API_KEY];
-
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
+        if (typeof baseUrl === "string" && baseUrl.trim()) {
+          apiBaseUrl = baseUrl.trim().replace(/\/+$/, "");
         }
-
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
+      })
+      .catch(() => { /* fall back below */ })
+      .then(() => {
+        if (!apiBaseUrl) apiBaseUrl = DEFAULT_HUB;
         return apiBaseUrl;
       })
       .finally(() => {
@@ -29,25 +34,55 @@ async function getApiBaseUrl() {
   return apiConfigRequest;
 }
 
-
-// A bare axios stream has no file name, so the bot used to treat it as a PICTURE.
-// Marking it with an .mp4 name makes it go out as a real video.
-async function getVideoStream(url) {
+// Instagram needs a file name/extension to know a file is a VIDEO (a bare stream
+// is sent as a picture). So the video is downloaded and handed over with an .mp4 name.
+async function getVideo(url) {
   const res = await axios.get(url, {
-    responseType: "stream",
+    responseType: "arraybuffer",
     timeout: 60000,
-    headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/" }
+    maxContentLength: MAX_BYTES,
+    maxBodyLength: MAX_BYTES,
+    headers: { "User-Agent": UA, "Referer": "https://www.tiktok.com/" }
   });
-  const stream = res.data;
-  stream.path = "tiktok.mp4";
-  return stream;
+  const buffer = Buffer.from(res.data);
+  if (!buffer.length) throw new Error("empty video");
+  return { buffer, fileName: "tiktok.mp4" };
+}
+
+async function getThumb(url) {
+  const res = await axios.get(url, {
+    responseType: "arraybuffer",
+    timeout: 20000,
+    headers: { "User-Agent": UA }
+  });
+  return { buffer: Buffer.from(res.data), fileName: "thumb.jpg" };
+}
+
+async function searchTikTok(query) {
+  const base = await getApiBaseUrl();
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await axios.get(`${base}/api/tik`, {
+        params: { q: query },
+        timeout: 30000,
+        headers: { "User-Agent": UA }
+      });
+      const results = res.data && res.data.results;
+      return Array.isArray(results) ? results.filter(r => r && r.video_url) : [];
+    } catch (e) {
+      lastError = e;
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  throw lastError;
 }
 
 module.exports = {
   config: {
     name: "tiktok",
     aliases: ["tik", "tt"],
-    version: "1.2.0",
+    version: "1.3.0",
     author: "CRX Shihab",
     countDown: 10,
     role: 0,
@@ -56,105 +91,106 @@ module.exports = {
     guide: "{pn} [query] or {pn} [query] -list"
   },
 
-  onStart: async function ({ api, event, args }) {
-    const { threadID, messageID } = event;
-
-    if (args.length === 0) {
-      return api.sendMessage("╭─❍\n│ Usage: {pn} [query]\n│ List: {pn} [query] -list\n╰───────────⟡", threadID, messageID);
-    }
+  onStart: async function ({ api, event, args, message }) {
+    const { messageID } = event;
+    const react = emoji => Promise.resolve(api.setMessageReaction(emoji, messageID)).catch(() => {});
 
     const isList = args.includes("-list");
-    const searchQuery = args.filter(arg => arg !== "-list").join(" ");
+    const searchQuery = args.filter(arg => arg !== "-list").join(" ").trim();
 
-    if (!searchQuery) return api.sendMessage("✕ Please provide a search query!", threadID, messageID);
-
-    api.setMessageReaction("🔍", messageID, () => {}, true);
-
-    // Loading the API address used to sit OUTSIDE any try/catch: if it failed the command
-    // just stayed silent. Now it retries and always answers.
-    let API_URL;
-    for (let attempt = 1; attempt <= 3 && !API_URL; attempt++) {
-      try {
-        API_URL = `${await getApiBaseUrl()}/api/tik`;
-      } catch (e) {
-        console.log(`[tiktok] could not load API address (try ${attempt}/3):`, e && e.message);
-        if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
-      }
+    if (!searchQuery) {
+      return message.reply("╭─❍\n│ Usage: tiktok [query]\n│ List: tiktok [query] -list\n╰───────────⟡");
     }
-    if (!API_URL) {
-      api.setMessageReaction("❌", messageID, () => {}, true);
-      return api.sendMessage("✕ TikTok API address could not be loaded. Try again in a moment.", threadID, messageID);
+
+    await react("🔍");
+
+    let results;
+    try {
+      results = await searchTikTok(searchQuery);
+    } catch (error) {
+      console.log("[tiktok] search failed:", error && (error.message || error));
+      await react("❌");
+      return message.reply("✕ API Error or Timeout!");
+    }
+
+    if (!results.length) {
+      await react("❌");
+      return message.reply("✕ No videos found!");
     }
 
     try {
-      const res = await axios.get(`${API_URL}?q=${encodeURIComponent(searchQuery)}`, { timeout: 30000 });
-      const results = res.data.results;
-
-      if (!results || results.length === 0) {
-        api.setMessageReaction("❌", messageID, () => {}, true);
-        return api.sendMessage("✕ No videos found!", threadID, messageID);
-      }
-
       if (isList) {
+        const top = results.slice(0, 6);
         let msg = `❖ 𝗧𝗜𝗞𝗧𝗢𝗞 𝗦𝗘𝗔𝗥𝗖𝗛 ❖\n━━━━━━━━━━━━━━━━━━\n`;
-        let attachments = [];
-
-        for (let i = 0; i < Math.min(6, results.length); i++) {
-          msg += `${i + 1}. ${results[i].title}\n👤 Author: ${results[i].author}\n\n`;
-          const thumbStream = (await axios.get(results[i].thumbnail, { responseType: 'stream' })).data;
-          attachments.push(thumbStream);
-        }
-
+        top.forEach((r, i) => {
+          msg += `${i + 1}. ${r.title || "No title"}\n👤 Author: ${r.author || "Unknown"}\n\n`;
+        });
         msg += `━━━━━━━━━━━━━━━━━━\nReply with the number to download!`;
-        api.setMessageReaction("📜", messageID, () => {}, true);
 
-        return api.sendMessage({ body: msg, attachment: attachments }, threadID, (err, info) => {
+        // thumbnails are optional: a broken one must never break the list
+        const thumbs = (await Promise.all(
+          top.map(r => (r.thumbnail ? getThumb(r.thumbnail).catch(() => null) : null))
+        )).filter(Boolean);
+
+        const form = thumbs.length ? { body: msg, attachment: thumbs } : msg;
+        const info = await message.reply(form);
+        await react("📜");
+
+        if (info && info.messageID) {
           global.GoatBot.onReply.set(info.messageID, {
             commandName: this.config.name,
             messageID: info.messageID,
             author: event.senderID,
-            results: results
+            results: top
           });
-        }, messageID);
+        }
+        return;
       }
 
-      api.setMessageReaction("📥", messageID, () => {}, true);
-      const videoStream = await getVideoStream(results[0].video_url);
-
-      return api.sendMessage({
-        attachment: videoStream
-      }, threadID, messageID);
-
+      // direct mode: try the first few results until one downloads
+      await react("📥");
+      let lastError;
+      for (const item of results.slice(0, 3)) {
+        try {
+          const video = await getVideo(item.video_url);
+          await message.reply({ attachment: video });
+          await react("✅");
+          return;
+        } catch (e) {
+          lastError = e;
+        }
+      }
+      throw lastError || new Error("download failed");
     } catch (error) {
       console.log("[tiktok] failed:", error && (error.message || error));
-      api.setMessageReaction("❌", messageID, () => {}, true);
-      return api.sendMessage("✕ API Error or Timeout!", threadID, messageID);
+      await react("❌");
+      return message.reply("✕ API Error or Timeout!");
     }
   },
 
-  onReply: async function ({ api, event, Reply, args }) {
-    const { threadID, messageID, body, senderID } = event;
+  onReply: async function ({ api, event, Reply, message }) {
+    const { messageID, body, senderID } = event;
     const { results, author } = Reply;
 
     if (senderID !== author) return;
 
     const index = parseInt(body) - 1;
     if (isNaN(index) || index < 0 || index >= results.length) {
-      return api.sendMessage("✕ Invalid selection!", threadID, messageID);
+      return message.reply("✕ Invalid selection!");
     }
 
-    api.unsendMessage(Reply.messageID);
-    api.setMessageReaction("📥", messageID, () => {}, true);
+    Promise.resolve(api.unsendMessage(Reply.messageID)).catch(() => {});
+    Promise.resolve(api.setMessageReaction("📥", messageID)).catch(() => {});
 
     try {
-      const videoStream = await getVideoStream(results[index].video_url);
-      return api.sendMessage({
-        body: `❖ 𝗧𝗜𝗞𝗧𝗢𝗞 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗 ❖\n━━━━━━━━━━━━━━━━━━\n📝 Title: ${results[index].title}`,
-        attachment: videoStream
-      }, threadID, messageID);
+      const video = await getVideo(results[index].video_url);
+      return await message.reply({
+        body: `❖ 𝗧𝗜𝗞𝗧𝗢𝗞 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗 ❖\n━━━━━━━━━━━━━━━━━━\n📝 Title: ${results[index].title || ""}`,
+        attachment: video
+      });
     } catch (error) {
       console.log("[tiktok] download failed:", error && (error.message || error));
-      return api.sendMessage("✕ Failed to download video!", threadID, messageID);
+      return message.reply("✕ Failed to download video!");
     }
   }
 };
