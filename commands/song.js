@@ -1,134 +1,372 @@
+/**
+ * File Name: song.js
+ * ICA: igbot-api
+ * Auhor: Tanvir Ahmed (Tanvir143)
+ * GitHub: www.github.com/143tanvir
+ * WhatsApp: +8801750079773
+ * Note: Project metadata only; original source credits and license notices are retained.
+ */
+
+
+"use strict";
+
+const fs = require("fs-extra");
 const axios = require("axios");
+const path = require("path");
 
-const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-hub";
-let apiBaseUrl = null;
-let apiConfigRequest = null;
+const MAX_SIZE = 25 * 1024 * 1024;
 
-async function getApiBaseUrl() {
-  if (apiBaseUrl) return apiBaseUrl;
+function getError(err) {
+    if (!err) return "Unknown error";
+    if (typeof err === "string") return err;
 
-  if (!apiConfigRequest) {
-    apiConfigRequest = axios
-      .get(API_CONFIG_URL, { timeout: 15000 })
-      .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
+    const data = err.response?.data;
 
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
+    if (typeof data === "string") return data;
+
+    if (data && typeof data === "object") {
+        try {
+            return JSON.stringify(data);
+        } catch (_) {}
+    }
+
+    return err.message || String(err);
+}
+
+function formatDuration(value) {
+    if (value === undefined || value === null || value === "") {
+        return "Unknown";
+    }
+
+    if (typeof value === "string" && value.includes(":")) {
+        return value;
+    }
+
+    let seconds = Number(value);
+
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+        return "Unknown";
+    }
+
+    // Some APIs provide duration in milliseconds.
+    if (seconds > 10000) {
+        seconds = Math.floor(seconds / 1000);
+    }
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+
+    return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function findAudioUrl(obj, depth = 0) {
+    if (!obj || typeof obj !== "object" || depth > 5) {
+        return null;
+    }
+
+    const keys = [
+        "progressive_download_url",
+        "fast_start_progressive_download_url",
+        "download_url",
+        "downloadUrl",
+        "audio_url",
+        "audioUrl",
+        "previewUrl",
+        "preview_url",
+        "web_30s_preview_download_url",
+        "stream_url",
+        "streamUrl",
+        "url",
+        "src",
+        "link"
+    ];
+
+    for (const key of keys) {
+        const value = obj[key];
+
+        if (
+            typeof value === "string" &&
+            /^https?:\/\//i.test(value)
+        ) {
+            return value;
         }
 
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
-        return apiBaseUrl;
-      })
-      .finally(() => {
-        apiConfigRequest = null;
-      });
-  }
+        if (value && typeof value === "object") {
+            const nested = findAudioUrl(value, depth + 1);
+            if (nested) return nested;
+        }
+    }
 
-  return apiConfigRequest;
+    for (const key of [
+        "track",
+        "data",
+        "result",
+        "audio",
+        "media",
+        "music"
+    ]) {
+        if (obj[key] && typeof obj[key] === "object") {
+            const nested = findAudioUrl(obj[key], depth + 1);
+            if (nested) return nested;
+        }
+    }
+
+    return null;
 }
-const { PassThrough } = require("stream");
 
-module.exports = {
-  config: {
-    name: "song",
-    version: "4.0",
-    author: "CRX Shihab",
-    countDown: 2,
-    role: 0,
-    shortDescription: {
-      en: "Search and play a song from SoundCloud"
-    },
-    longDescription: {
-      en: "Fetches a matching song and sends the audio"
-    },
-    category: "MEDIA",
-    guide: {
-      en: "{pn} <song name>"
+function getFirstTrack(data) {
+    if (!data) return null;
+
+    let list = Array.isArray(data)
+        ? data
+        : data.items ||
+          data.tracks ||
+          data.results ||
+          data.songs ||
+          data.data?.items ||
+          data.data?.tracks ||
+          data.data?.results ||
+          data.data ||
+          (data.track ? [data.track] : []);
+
+    if (!Array.isArray(list)) {
+        list = list && typeof list === "object" ? [list] : [];
     }
-  },
 
-  onStart: async function ({ api, event, args }) {
-    const { threadID, messageID } = event;
-    const query = args.join(" ").trim();
+    if (!list.length) return null;
 
-    if (!query) {
-      return api.sendMessage(
-        "❌ Please enter a song name.\nExample: /song Happy Nation",
-        threadID,
-        messageID
-      );
+    // Always use the first search result.
+    const entry = list[0];
+    const track = entry?.track || entry?.original_sound || entry;
+
+    const duration =
+        track?.duration ??
+        track?.duration_seconds ??
+        track?.durationSeconds ??
+        track?.length ??
+        track?.video_duration ??
+        entry?.duration ??
+        0;
+
+    return {
+        title:
+            track?.title ||
+            track?.canonical_title ||
+            track?.name ||
+            "Unknown Song",
+
+        artist:
+            track?.artist ||
+            track?.display_artist ||
+            track?.singer ||
+            track?.channel ||
+            track?.artist_name ||
+            "Unknown Artist",
+
+        duration,
+
+        url:
+            findAudioUrl(entry) ||
+            findAudioUrl(track)
+    };
+}
+
+async function searchFirstSong(api, message, query) {
+    let result;
+
+    if (typeof api.searchMusic === "function") {
+        result = await api.searchMusic(query);
+    } else if (typeof message.musicSearch === "function") {
+        result = await message.musicSearch(query);
+    } else {
+        throw new Error("ICA music search method paoa jayni.");
     }
+
+    console.log(
+        "[SONG SEARCH RESULT]",
+        JSON.stringify(result, null, 2)
+    );
+
+    const track = getFirstTrack(result);
+
+    if (!track) {
+        throw new Error("Kono song search result paoa jayni.");
+    }
+
+    if (!track.url) {
+        throw new Error(
+            "First result-e downloadable audio URL nei."
+        );
+    }
+
+    return track;
+}
+
+async function sendFirstSong(api, event, track) {
+    const dir = path.join(__dirname, "tmp");
+    await fs.ensureDir(dir);
+
+    const file = path.join(
+        dir,
+        `song_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`
+    );
+
+    let writer;
 
     try {
-      api.setMessageReaction("🎵", messageID, () => {}, true);
+        const response = await axios.get(track.url, {
+            responseType: "stream",
+            timeout: 60000,
+            maxRedirects: 5,
+            headers: {
+                "User-Agent": "Mozilla/5.0"
+            },
+            validateStatus: status => status >= 200 && status < 300
+        });
 
-      const { data } = await axios.get(
-        `${await getApiBaseUrl()}/api/scdlv2?query=${encodeURIComponent(query)}`,
-        {
-          timeout: 20000,
-          headers: {
-            "User-Agent": "Mozilla/5.0"
-          }
+        const contentType = String(
+            response.headers["content-type"] || ""
+        ).toLowerCase();
+
+        if (
+            contentType.includes("text/html") ||
+            contentType.includes("application/json")
+        ) {
+            response.data.destroy();
+            throw new Error("Audio URL theke audio file paoa jayni.");
         }
-      );
 
-      if (!data?.status || !data?.result?.download_url) {
-        throw new Error(data?.message || "Song not found");
-      }
+        const contentLength = Number(
+            response.headers["content-length"] || 0
+        );
 
-      const title = data.result.title || query;
-      const downloadUrl = data.result.download_url;
-
-      const audio = await axios.get(downloadUrl, {
-        responseType: "stream",
-        timeout: 60000,
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
-          "Accept": "audio/mpeg,audio/*,*/*;q=0.8",
-          "Referer": "https://soundcloud.com/"
+        if (contentLength > MAX_SIZE) {
+            response.data.destroy();
+            throw new Error("Song file 25 MB-er beshi.");
         }
-      });
 
-      const stream = new PassThrough({
-        highWaterMark: 1024 * 1024
-      });
+        let downloaded = 0;
+        writer = fs.createWriteStream(file);
 
-      audio.data.on("error", error => {
-        stream.destroy(error);
-      });
+        await new Promise((resolve, reject) => {
+            response.data.on("data", chunk => {
+                downloaded += chunk.length;
 
-      audio.data.pipe(stream);
+                if (downloaded > MAX_SIZE) {
+                    const error = new Error("Song file 25 MB-er beshi.");
+                    response.data.destroy(error);
+                    writer.destroy(error);
+                }
+            });
 
-      stream.path = `${title.replace(/[\\/:*?"<>|]/g, "_")}.mp3`;
+            response.data.on("error", reject);
+            writer.on("error", reject);
+            writer.on("finish", resolve);
 
-      const result = await api.sendMessage(
-        {
-          body: `🎧 ${title}`,
-          attachment: stream
-        },
-        threadID,
-        messageID
-      );
+            response.data.pipe(writer);
+        });
 
-      api.setMessageReaction("✅", messageID, () => {}, true);
+        if (!downloaded || !fs.existsSync(file)) {
+            throw new Error("Downloaded audio file empty.");
+        }
 
-      return result;
+        const stat = await fs.stat(file);
 
-    } catch (error) {
-      console.error("SONG ERROR:", error);
+        if (stat.size > MAX_SIZE) {
+            throw new Error("Song file 25 MB-er beshi.");
+        }
 
-      api.setMessageReaction("❌", messageID, () => {}, true);
+        const duration = formatDuration(track.duration);
 
-      return api.sendMessage(
-        `❌ Failed to fetch song\n\n${error.message || "Unknown error"}`,
-        threadID,
-        messageID
-      );
+        const stream = fs.createReadStream(file);
+
+        await new Promise((resolve, reject) => {
+            api.sendMessage(
+                {
+                    attachment: stream
+                },
+                event.threadID,
+                err => {
+                    if (err) return reject(err);
+                    resolve();
+                },
+                event.messageID
+            );
+        });
+    } finally {
+        if (writer && !writer.destroyed) {
+            writer.destroy();
+        }
+
+        await fs.remove(file).catch(() => {});
     }
-  }
+}
+
+async function react(api, event, emoji) {
+    try {
+        await api.setMessageReaction(
+            emoji,
+            event.messageID,
+            event.threadID
+        );
+    } catch (_) {}
+}
+
+module.exports = {
+    config: {
+        name: "song",
+        aliases: ["sing", "play", "audio"],
+        version: "5.0.0",
+        author: "Tanvir143",
+        countDown: 10,
+        role: 0,
+        category: "Users cmd",
+
+        description: {
+            en: "Search and send the first song as audio."
+        },
+
+        guide: {
+            en: "{pn} <song name>"
+        }
+    },
+
+    onStart: async function ({ api, event, args, message }) {
+        const query = args.join(" ").trim();
+
+        if (!query) {
+            await react(api, event, "❌");
+
+            return message.reply(
+                "🎵 Gaaner naam dao.\nExample: .song Jaane Kyun"
+            );
+        }
+
+        await react(api, event, "😘");
+
+        try {
+            const track = await searchFirstSong(
+                api,
+                message,
+                query
+            );
+
+            await sendFirstSong(api, event, track);
+
+            await react(api, event, "✅");
+        } catch (err) {
+            console.error("[SONG ERROR]", err);
+
+            await react(api, event, "❌");
+
+            return message.reply(
+                `❌ Song pathano jayni.\n📝 ${getError(err)}`
+            );
+        }
+    }
 };
