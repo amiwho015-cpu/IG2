@@ -246,9 +246,20 @@ module.exports.onReply = async ({ api, event }) => {
     }
 };
 
+const greetings = ["hi", "hii", "hiii", "hello", "hlw", "hlo", "helo", "hey", "salam", "slm", "assalamualaikum", "assalamu", "asalamualaikum", "আসসালামু", "সালাম", "হাই", "হ্যালো", "হেলো"];
+const GREET_REPLY = "আমাকে না ডেকে আমার শিহাব বসের জন্য একটা জিএফ খুঁজে দে...🫦💋";
+
 module.exports.onChat = async ({ api, event, usersData }) => {
     try {
         const body = event.body ? event.body.toLowerCase() : "";
+
+        // Plain greeting (no command) -> always the same reply
+        const firstWord = body.trim().split(/\s+/)[0].replace(/[^\p{L}\p{N}]/gu, "");
+        if (firstWord && greetings.includes(firstWord) && !event.attachments?.length) {
+            const senderName = (await usersData.getName(event.senderID)) || "User";
+            const mentionObj = utils.realMention(senderName, event.senderID, GREET_REPLY);
+            return await api.sendMessage(mentionObj, event.threadID, event.messageID);
+        }
         const hasTrigger = triggers.some(t => body.startsWith(t));
         if (!hasTrigger) return;
 
@@ -263,10 +274,7 @@ module.exports.onChat = async ({ api, event, usersData }) => {
 
         if (!arr) {
             const baseReplies = [
-                "তোর তো বিয়ে হয় নাই বেবি পাইলি কই-🤦🏻", "পরকিয়া করছোছ নাকি শালা-🥲🤧", "তোকে ছাড়া বড় মন খারাপ লাগে 💔", "তোরে খুব মিস করছি জানিস? 🥺", "আপনার যদি পার্সোনাল বেবি না থাকে তাহলে আমার বসের সাথে প্রেম করুন🌚",
-                "ডিসটার্ব করিস না জামাই আদর করতেছে-🌚💋", "এত ডাকিস না এমন থাপ্পর দিমু পেন্টে মুইতা দিবি-😾👋🏻", "বেবি ডাকিস না 🍼 খাওয়া-😒👍🏻", "আমার এডমিনের সাথে প্রেম করলে দশ টাকা দিমু🌚", "এভাবে ডাকার কি আছে কি বলবা বলো🙈",
-                "কি ডাকোস কেন টাকা শেষ নাকি-🌚🤌🏻", "পিনিক ধরেছে যখন বটকে না ডেকে লেবু খান তখন🍋🐸", "ভিডিও কল দিব নাকি সোনা 🌚🫦", "আম্মু ডাক শালা 😾🦶🏻", "উষ্টা খাইতে না চাইলে সামনে থেকে সর তোদের বস আসছে😡🙈",
-                "বেবি না ডাইকা আমার এডমিনকে গার্লফ্রেন্ড খুজে দে-🙃🫶🏻", "ডাকিস না তারেক জিয়ার সাথে মিটিংয়ে আছি 😒🖐🏻", "বস ডাক বস😾✌🏻", "বেবি ডাকিস না পরে কোলে উঠে অন্য কিছু খেতে মন চাইবে🌚💋"
+                "আমাকে না ডেকে আমার শিহাব বসের জন্য একটা জিএফ খুঁজে দে...🫦💋"
             ];
             const mentionObj = utils.realMention(senderName, uid, baseReplies[Math.floor(Math.random() * baseReplies.length)]);
             return await api.sendMessage(mentionObj, event.threadID, (error, info) => {
