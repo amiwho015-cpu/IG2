@@ -1,13 +1,12 @@
 "use strict";
 
 /**
- * Direct-mode media shim.
+ * Media shim.
  *
- * In server mode auth.js provides sendImage / sendVideo / sendAudio / sendMusic /
- * musicSearch. The local @lazyneoaz/ig-chat-api package (direct mode) does not, so
- * every GoatBot-style command that sends media failed with
- * "api.sendImage is not a function". This adds the missing methods, with the SAME
- * signatures auth.js exposes, on top of sendMessage({ attachment }):
+ * The api built by igAdapter exposes sendMessage / reactions / unsend, but not the
+ * GoatBot-style media helpers. Without them every command that sends media failed with
+ * "api.sendImage is not a function". This adds them, with these signatures, on top of
+ * sendMessage({ attachment }):
  *
  *   sendImage(src, threadID, caption, cb, reply)
  *   sendVideo(src, threadID, [caption,] cb, reply)
@@ -62,7 +61,7 @@ function drain(stream) {
 
 async function fetchBuffer(url) {
 	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), 90000);
+	const timer = setTimeout(() => controller.abort(), 180000);
 	try {
 		const headers = { "User-Agent": UA, "Accept": "*/*" };
 		try { if (new URL(url).hostname.includes("tiktok")) headers.Referer = "https://www.tiktok.com/"; } catch (_) { /* ignore */ }
@@ -125,7 +124,7 @@ function install(api) {
 
 	const sendRaw = (form, threadID, reply) => new Promise((resolve, reject) => {
 		let settled = false;
-		const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error("Instagram send timed out")); } }, 120000);
+		const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error("Instagram send timed out")); } }, 300000);
 		const cb = (error, result) => {
 			if (settled) return;
 			settled = true;
@@ -182,7 +181,7 @@ function install(api) {
 	if (typeof api.sendAvatarTextEffect !== "function") {
 		api.sendAvatarTextEffect = (text, threadID, effect, cb) => plain(text, threadID, cb); added.push("sendAvatarTextEffect");
 	}
-	// Different ig-chat-api builds name these differently; alias whatever exists.
+	// Alias whatever differently-named equivalent exists.
 	const alias = (target, candidates) => {
 		if (typeof api[target] === "function") return;
 		const found = candidates.find(n => typeof api[n] === "function");
@@ -218,7 +217,7 @@ function install(api) {
 		api.unsendMessage = wrapped;
 	}
 	else if (typeof api.unsendMessage !== "function") {
-		log.warn("MEDIA", "this ig-chat-api build has no unsend method; unsend commands cannot work");
+		log.warn("MEDIA", "this api has no unsend method; unsend commands cannot work");
 	}
 	if (typeof api.sendTypingIndicator !== "function") {
 		api.sendTypingIndicator = (threadID, cb) => { if (typeof cb === "function") cb(null); return () => { }; };
@@ -227,7 +226,7 @@ function install(api) {
 	}
 	if (typeof api.musicSearch !== "function") {
 		api.musicSearch = (query, cb) => {
-			const error = new Error("Instagram music search is not available in direct mode. Set music.apiUrl in config.json to a song API.");
+			const error = new Error("Instagram music search is not available. Set music.apiUrl in config.json to a song API.");
 			if (typeof cb === "function") { cb(error); return Promise.resolve(); }
 			return Promise.reject(error);
 		};

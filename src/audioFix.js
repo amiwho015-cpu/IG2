@@ -18,7 +18,7 @@ try { fs.mkdirSync(TMP, { recursive: true }); } catch (_) { /* ignore */ }
 const OK_EXT = new Set([".m4a", ".mp4", ".aac"]);
 // Bitrate for every converted audio file (mono AAC). 54k = about 405 KB per minute.
 const AUDIO_BITRATE = "54k";
-const MAX_BYTES = Number(process.env.IG_AUDIO_MAX_BYTES) || 12 * 1024 * 1024;
+const MAX_BYTES = Number(process.env.IG_AUDIO_MAX_BYTES) || 30 * 1024 * 1024;
 
 function ffmpegBin() {
 	try { const p = require("ffmpeg-static"); if (p) return p; } catch (_) { /* use system */ }
@@ -150,7 +150,7 @@ async function toVoiceSource(source, hint = {}) {
 	}
 }
 
-const VIDEO_MAX = Number(process.env.IG_VIDEO_MAX_BYTES) || 8 * 1024 * 1024; // larger clips are re-encoded below this
+const VIDEO_MAX = Number(process.env.IG_VIDEO_MAX_BYTES) || 30 * 1024 * 1024; // larger clips are re-encoded below this
 
 function probeDuration(file) {
 	return new Promise(resolve => {
@@ -166,7 +166,7 @@ function probeDuration(file) {
 }
 
 /**
- * Instagram bridge accepts ~5 MB of media per message. Shrink bigger videos
+ * Media up to 30 MB is sent as-is. Shrink bigger videos
  * (re-encode to H.264/AAC sized for the clip's length) instead of failing.
  * Returns the original source when it already fits or cannot be inspected.
  */
@@ -187,17 +187,17 @@ async function toSendableVideo(source) {
 	const output = path.join(TMP, `${rand()}.mp4`); temp.push(output);
 	try {
 		const duration = await probeDuration(file);
-		if (!duration) throw new Error("Video is too large to send (over 5 MB) and could not be compressed.");
+		if (!duration) throw new Error("Video is too large to send (over 30 MB) and could not be compressed.");
 		const audioBps = 64000;
 		let videoBps = Math.floor((VIDEO_MAX * 8 * 0.9) / duration) - audioBps;
-		if (videoBps < 90000) throw new Error(`Video is too long (${Math.round(duration)}s) to fit Instagram's 5 MB limit.`);
+		if (videoBps < 90000) throw new Error(`Video is too long (${Math.round(duration)}s) to fit the 30 MB limit.`);
 		for (let attempt = 0; attempt < 2; attempt++) {
-			const height = videoBps < 250000 ? 240 : 360;
+			const height = videoBps < 250000 ? 240 : videoBps < 900000 ? 360 : videoBps < 2000000 ? 480 : 720;
 			await run(["-y", "-loglevel", "error", "-i", file, "-vf", `scale=-2:${height}`, "-c:v", "libx264", "-preset", "ultrafast",
 				"-b:v", String(videoBps), "-maxrate", String(Math.floor(videoBps * 1.3)), "-bufsize", String(videoBps * 2),
 				"-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "64k", "-ac", "2", "-movflags", "+faststart", output]);
 			if (fs.statSync(output).size <= VIDEO_MAX) break;
-			if (attempt === 1) throw new Error("Video is still over 5 MB after compression.");
+			if (attempt === 1) throw new Error("Video is still over 30 MB after compression.");
 			videoBps = Math.floor(videoBps * 0.6);
 		}
 		const buffer = fs.readFileSync(output);

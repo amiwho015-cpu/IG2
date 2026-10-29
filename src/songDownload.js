@@ -18,7 +18,7 @@ const { spawn } = require("child_process");
 
 const APIS_JSON_URL = "https://raw.githubusercontent.com/eshitax/shadowx-apis/refs/heads/main/apis.json";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_BYTES = 30 * 1024 * 1024;
 const TOSHIRO = "https://toshiro-api-editz6t9.vercel.app/api/downloader";
 const TOSHIRO_ENDPOINTS = { yta2: `${TOSHIRO}/yta2`, ytaudio: `${TOSHIRO}/yt-audio` };
 
