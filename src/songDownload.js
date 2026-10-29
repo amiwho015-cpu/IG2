@@ -66,22 +66,26 @@ async function apiBases() {
 	return list;
 }
 
-async function viaApi(url) {
+function makeViaApi(type, quality, ext) {
+	return async function (url) {
 	let lastError = new Error("no API worked");
 	for (const base of await apiBases()) {
 		try {
-			const { data } = await axios.get(`${base}/api/yt?url=${encodeURIComponent(url)}&type=mp3&quality=128`, { timeout: 25000, headers: { "User-Agent": UA } });
+			const { data } = await axios.get(`${base}/api/yt?url=${encodeURIComponent(url)}&type=${type}&quality=${quality}`, { timeout: 40000, headers: { "User-Agent": UA } });
 			const link = data && data.success !== false && data.download && data.download.downloadUrl;
 			if (!link) throw new Error("no download link");
-			const res = await axios.get(link, { responseType: "stream", timeout: 60000, headers: { "User-Agent": UA } });
-			const file = tmpFile("mp3");
+			const res = await axios.get(link, { responseType: "stream", timeout: 120000, headers: { "User-Agent": UA } });
+			const file = tmpFile(ext);
 			await saveStream(res.data, file);
 			return file;
 		}
 		catch (e) { lastError = e; }
 	}
 	throw lastError;
+	};
 }
+const viaApi = makeViaApi("mp3", 128, "mp3");
+const viaApiVideo = makeViaApi("mp4", 360, "mp4");
 
 /** First downloadable link in an API answer (any shape: string, object, list). */
 function findLink(obj, depth = 0) {
@@ -132,6 +136,33 @@ async function viaYtdl(url) {
 	finally { /* raw is removed by the caller only when it is the file that gets sent */ }
 }
 
+/** Direct YouTube video (audio+video in one mp4, <= 30 MB) via ytdl-core. */
+async function viaYtdlVideo(url) {
+	const ytdl = require("@distube/ytdl-core");
+	const file = tmpFile("mp4");
+	const filters = [
+		{ quality: "18" },   // 360p mp4 with sound
+		{ filter: f => f.hasVideo && f.hasAudio && f.container === "mp4", quality: "lowest" }
+	];
+	let lastError = new Error("no video format");
+	for (const opt of filters) {
+		try { await saveStream(ytdl(url, { ...opt, highWaterMark: 1 << 25 }), file); return file; }
+		catch (e) { lastError = e; try { fs.unlinkSync(file); } catch (_) { /* nothing written */ } }
+	}
+	throw lastError;
+}
+
+/** Returns a file path to the video. order e.g. ["api","ytdl"]. */
+async function downloadVideo(url, order = ["api", "ytdl"]) {
+	const methods = { api: viaApiVideo, ytdl: viaYtdlVideo };
+	const errors = [];
+	for (const name of order) {
+		try { return await methods[name](url); }
+		catch (e) { errors.push(`${name}: ${(e && e.message) || e}`); }
+	}
+	throw new Error(errors.join(" | "));
+}
+
 /** Returns a file path to the audio. order e.g. ["api","ytdl"]. */
 async function downloadAudio(url, order) {
 	const methods = { api: viaApi, ytdl: viaYtdl, yta2: viaToshiro("yta2"), ytaudio: viaToshiro("ytaudio") };
@@ -148,4 +179,4 @@ function removeLater(file, ms = 20000) {
 	if (t.unref) t.unref();
 }
 
-module.exports = { search, downloadAudio, removeLater };
+module.exports = { search, downloadAudio, downloadVideo, removeLater };
