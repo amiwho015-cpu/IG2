@@ -1,5 +1,6 @@
 "use strict";
 
+const { hdProfilePicture } = require("../src/hdpic");
 const { resolveUserTarget, resolveProfile, isRateLimitError } = require("../src/utils");
 
 module.exports = {
@@ -30,6 +31,12 @@ module.exports = {
 		}
 
 		const name = (profile && (profile.name || profile.username)) || target.id;
+		// Prefer the HD picture; fall back to the plain URL if nothing downloads.
+		const hd = await hdProfilePicture(String(profile.userID || target.id), [picture]).catch(() => null);
+		if (hd && hd.buffer) {
+			const quality = hd.width ? ` • ${hd.width}x${hd.height}` : "";
+			return message.reply({ attachment: { buffer: hd.buffer, fileName: `profile_hd.${hd.ext}` }, body: `🖼️ ${name} (${target.id})${quality} HD`, textFirst: true });
+		}
 		await message.reply({ attachment: picture, body: `🖼️ ${name} (${target.id})`, textFirst: true });
 	}
 };

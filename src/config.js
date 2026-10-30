@@ -109,8 +109,26 @@ function loadConfig() {
 	config.server.timeout = Number(config.server.timeout) || 60000;
 	// "direct" = log in with the local ig-chat-api package (like Insta-Bot3);
 	// anything else = use the hosted server above. IG_MODE overrides the file.
+	// The old hosted ICA server is dead, so every deploy uses the built-in instachat-api
+	// no matter what stale IG_MODE / IG_API_SERVER variables or config.json say.
+	// Only IG_FORCE_MODE=1 lets IG_MODE (or config.server.mode) pick "direct" / "server".
 	const modeEnv = process.env.IG_MODE && process.env.IG_MODE.trim().toLowerCase();
-	config.server.mode = modeEnv === "direct" || modeEnv === "server" ? modeEnv : (config.server.mode === "direct" ? "direct" : "server");
+	const fileMode = String(config.server.mode || "").toLowerCase();
+	const validModes = ["instachat", "direct", "server"];
+	const forced = process.env.IG_FORCE_MODE === "1";
+	config.server.mode = forced ? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "instachat")) : "instachat";
+	// instachat-api (vendored in lib/instachat-api): polling + send throttle settings.
+	const ic = config.instachat && typeof config.instachat === "object" ? config.instachat : {};
+	config.instachat = ic;
+	if (!(Number(ic.pollIntervalMs) >= 1000)) ic.pollIntervalMs = 2500;
+	if (!(Number(ic.idlePollIntervalMs) >= 1000)) ic.idlePollIntervalMs = 8000;
+	if (ic.adaptivePolling == null) ic.adaptivePolling = true;
+	if (ic.throttle !== false) {
+		ic.throttle = ic.throttle && typeof ic.throttle === "object" ? ic.throttle : {};
+		if (ic.throttle.minGapMs == null) ic.throttle.minGapMs = 700;
+		if (ic.throttle.perThreadGapMs == null) ic.throttle.perThreadGapMs = 1200;
+		if (ic.throttle.jitterMs == null) ic.throttle.jitterMs = 300;
+	}
 	config.optionsFca = config.optionsFca && typeof config.optionsFca === "object" ? config.optionsFca : {};
 
 	// Typing indicator shown before the bot sends anything (toggle: `typingindicator`).
@@ -192,13 +210,8 @@ function normalizeCookies(list) {
  * Parse account.txt into an Instagram cookie list.
  * Accepts: JSON array, JSON object, cookie header string, Netscape file.
  */
-function loadAccount() {
-	if (!fs.existsSync(accountPathFor()))
-		throw new Error(
-			"account.txt not found. Copy account.example.txt to account.txt and paste your Instagram cookies. " +
-			"It is git-ignored, so your cookies are never committed."
-		);
-	const text = fs.readFileSync(accountPathFor(), "utf8").trim();
+function parseAccountText(rawText) {
+	const text = String(rawText || "").trim();
 	if (!text) throw new Error("account.txt is empty");
 
 	let cookies = [];
@@ -226,12 +239,25 @@ function loadAccount() {
 
 	const has = key => cookies.some(cookie => cookie.key === key);
 	if (!has("sessionid") || !(has("ds_user_id") || has("userid")))
-		throw new Error("account.txt must contain Instagram `sessionid` and `ds_user_id` cookies");
+		throw new Error("Instagram cookies (IG_COOKIES / account.txt) must contain Instagram `sessionid` and `ds_user_id` cookies");
 
 	return cookies;
 }
 
+function loadAccount() {
+	// IG_COOKIES (env var, e.g. on Railway/Render) wins over account.txt.
+	const fromEnv = process.env.IG_COOKIES && process.env.IG_COOKIES.trim();
+	if (!fromEnv && !fs.existsSync(accountPathFor()))
+		throw new Error(
+			"No Instagram cookies found. Set the IG_COOKIES environment variable, or copy account.example.txt to account.txt and paste your cookies. " +
+			"account.txt is git-ignored, so your cookies are never committed."
+		);
+	return parseAccountText(fromEnv || fs.readFileSync(accountPathFor(), "utf8"));
+}
+
 module.exports = {
+	parseAccountText,
+	loadAccountFromEnv: parseAccountText,
 	ROOT,
 	get configPath() { return configPathFor(); },
 	get accountPath() { return accountPathFor(); },

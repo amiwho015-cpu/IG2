@@ -16,6 +16,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const log = require("./logger");
+const ig = require("./igActions");
 
 const ROOT = path.resolve(__dirname, "..");
 const TMP = path.join(os.tmpdir(), "instabot-goat");
@@ -59,11 +60,41 @@ function extFromUrl(url, contentType) {
 	return "jpg";
 }
 
-function randomString(length = 10, onlyLower = false) {
-	const chars = onlyLower ? "abcdefghijklmnopqrstuvwxyz0123456789" : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+/**
+ * GoatBot signature: randomString(length, onlyOnce, possible).
+ *   possible  characters to draw from (default: letters + digits)
+ *   onlyOnce  true => every character appears at most once (needed by games
+ *             such as guessnumber, which wants 4 DIFFERENT digits)
+ * The old compat version took (length, onlyLower) and ignored the 3rd argument,
+ * so guessnumber's answer was random letters+digits and could never be guessed.
+ */
+function randomString(length = 10, onlyOnce = false, possible) {
+	let chars = typeof possible === "string" && possible.length ? possible : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	if (onlyOnce === true) chars = Array.from(new Set(chars.split(""))).join("");
+	let pool = chars.split("");
 	let out = "";
-	for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)];
+	for (let i = 0; i < length; i++) {
+		if (!pool.length) pool = chars.split(""); // asked for more than there are unique characters
+		const at = Math.floor(Math.random() * pool.length);
+		out += pool[at];
+		if (onlyOnce === true) pool.splice(at, 1);
+	}
 	return out;
+}
+
+/** GoatBot convertTime: 3725000 -> "1h 2m 5s". */
+function convertTime(ms, hours = "h", minutes = "m", seconds = "s", millis = "ms") {
+	ms = Math.max(0, Number(ms) || 0);
+	const h = Math.floor(ms / 3600000);
+	const m = Math.floor((ms % 3600000) / 60000);
+	const sec = Math.floor((ms % 60000) / 1000);
+	const milli = Math.floor(ms % 1000);
+	const parts = [];
+	if (h) parts.push(h + hours);
+	if (m) parts.push(m + minutes);
+	if (sec) parts.push(sec + seconds);
+	if (!parts.length) parts.push(milli + millis);
+	return parts.join(" ");
 }
 
 async function downloadToTmp(url, hintExt) {
@@ -130,7 +161,7 @@ function cbify(run, cb) {
 }
 
 const goatUtils = {
-	getStreamFromURL, getStreamsFromAttachment, randomString, splitPage, monospace, getTime, downloadFile,
+	getStreamFromURL, getStreamsFromAttachment, randomString, convertTime, splitPage, monospace, getTime, downloadFile,
 	getPrefix: () => state.config && state.config.prefix || "/",
 	realMention: (text) => String(text || ""),
 	findUid: async (link) => { const m = String(link).match(/instagram\.com\/([A-Za-z0-9._]+)/); return m ? m[1] : null; },
@@ -140,6 +171,20 @@ const goatUtils = {
 };
 
 /* ------------------------------------------------------- reply / reaction */
+
+// A message that carries text AND an image is two Instagram messages; players
+// reply to either. send results expose `messageIDs` (see message.js); remember
+// which ids belong together and which thread they were sent to, so a handler
+// armed on one id also answers replies to its siblings.
+const siblings = new Map(); // messageID -> [other ids sent together with it]
+const messageThread = new Map(); // messageID -> threadID
+const mediaMessages = new Set(); // ids of messages that are / belong to an image post (see dispatcher fallback)
+const REMEMBER_MAX = 4000;
+
+function remember(map, key, value) {
+	map.set(key, value);
+	if (map.size > REMEMBER_MAX) map.delete(map.keys().next().value);
+}
 
 class BridgeMap extends Map {
 	constructor(kind) { super(); this.kind = kind; }
@@ -163,9 +208,36 @@ class BridgeMap extends Map {
 			else built.Reaction = data;
 			await method.call(script, built);
 		};
-		if (this.kind === "reply") dispatcher.registerOnReply(id, name, handler);
-		else dispatcher.registerOnReaction(id, name, handler);
+		const ids = [id, ...(siblings.get(id) || [])];
+		const threadID = messageThread.get(id) || data.threadID || null;
+		for (const key of ids) {
+			if (this.kind === "reply") {
+				// GoatBot semantics: a reply handler stays armed until the command
+				// calls global.GoatBot.onReply.delete(messageID). Consuming it on the
+				// first reply meant one invalid answer ended the whole game.
+				dispatcher.registerOnReply(key, name, handler, {
+					persistent: true,
+					threadID,
+					fallback: mediaMessages.has(id),
+					author: data.author != null ? data.author : (data.au != null ? data.au : null),
+					bodyMatch: data.replyBody || null
+				});
+			}
+			else dispatcher.registerOnReaction(key, name, handler);
+		}
 		return this;
+	}
+
+	delete(messageID) {
+		const id = String(messageID);
+		const keys = [id, ...(siblings.get(id) || [])];
+		let had = false;
+		for (const key of keys) had = super.delete(key) || had;
+		const dispatcher = state.dispatcher;
+		if (dispatcher && this.kind === "reply" && typeof dispatcher.unregisterOnReply === "function") {
+			for (const key of keys) dispatcher.unregisterOnReply(key);
+		}
+		return had;
 	}
 }
 
@@ -296,6 +368,62 @@ function threadsAdapter() {
 	};
 }
 
+/**
+ * GoatBot globalData: named records {key, data} shared by all threads (rankings,
+ * aliases ...). It used to be a stub returning {} - so guessnumber's ranking
+ * threw "findIndex is not a function" when a game ended. Persisted to
+ * <database dir>/globalData.json.
+ */
+function globalDataAdapter(database) {
+	const file = path.join((database && database.dir) || path.join(ROOT, "data"), "globalData.json");
+	let data = {};
+	try { data = JSON.parse(fs.readFileSync(file, "utf8")) || {}; } catch (_) { data = {}; }
+	let timer = null;
+	function save() {
+		if (timer) return;
+		timer = setTimeout(() => {
+			timer = null;
+			try {
+				fs.mkdirSync(path.dirname(file), { recursive: true });
+				fs.writeFileSync(file + ".tmp", JSON.stringify(data, null, 2));
+				fs.renameSync(file + ".tmp", file);
+			}
+			catch (error) { log.warn("GOAT", `could not save globalData: ${error.message}`); }
+		}, 250);
+		if (timer.unref) timer.unref();
+	}
+	function pick(obj, key, def) {
+		if (!key) return obj;
+		const val = String(key).split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
+		return val === undefined ? def : val;
+	}
+	function clone(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
+	return {
+		async get(name, key, def) {
+			const rec = data[String(name)];
+			if (!rec) return def === undefined ? (key ? undefined : {}) : clone(def);
+			const val = pick(rec, key, def);
+			return clone(val);
+		},
+		async set(name, value, key) {
+			const id = String(name);
+			const rec = data[id] || (data[id] = { key: id, data: {} });
+			if (key) {
+				const parts = String(key).split(".");
+				let cur = rec;
+				while (parts.length > 1) { const k = parts.shift(); if (typeof cur[k] !== "object" || cur[k] == null) cur[k] = {}; cur = cur[k]; }
+				cur[parts[0]] = clone(value);
+			}
+			else if (value && typeof value === "object") Object.assign(rec, clone(value));
+			save();
+			return rec;
+		},
+		async create(name, value) { const id = String(name); if (!data[id]) data[id] = Object.assign({ key: id, data: {} }, clone(value || {})); save(); return data[id]; },
+		async delete(name) { delete data[String(name)]; save(); },
+		async getAll() { return Object.values(data); }
+	};
+}
+
 /* ------------------------------------------------------------- api wrapper */
 
 function normForm(form) {
@@ -312,11 +440,27 @@ function normForm(form) {
 	return out;
 }
 
-function idOf(result) {
+function idOf(result, threadID) {
 	if (!result) return result;
-	if (typeof result !== "object") return { messageID: String(result) };
+	if (typeof result !== "object") result = { messageID: String(result) };
 	if (result.messageID == null) result.messageID = result.id || result.message_id || result.messageId || null;
+	if (result.messageID != null) {
+		const tid = threadID != null ? threadID : result.threadID;
+		if (tid != null) remember(messageThread, String(result.messageID), String(tid));
+	}
+	const all = Array.isArray(result.messageIDs) ? result.messageIDs.map(String) : [];
+	if (all.length > 1) for (const one of all) remember(siblings, one, all.filter(other => other !== one));
+	if ((all.length > 1 || result.mediaOnly === true) && result.messageID != null) {
+		for (const one of all.length ? all : [String(result.messageID)]) mediaMessages.add(one);
+		if (mediaMessages.size > REMEMBER_MAX) mediaMessages.delete(mediaMessages.values().next().value);
+	}
 	return result;
+}
+
+/** Fire-and-forget safe: a failed unsend (e.g. someone else's message) must not become an unhandled rejection. */
+function quiet(promise) {
+	if (promise && typeof promise.catch === "function") promise.catch(() => { });
+	return promise;
 }
 
 function createGoatApi(api, event) {
@@ -324,11 +468,14 @@ function createGoatApi(api, event) {
 
 	function send(form, tid, cb, replyID) {
 		if (typeof tid === "function") { replyID = cb; cb = tid; tid = threadID; }
+		// FCA style: sendMessage(form, threadID, messageID) - the 3rd argument is the message to reply to.
+		if (cb != null && typeof cb !== "function") { replyID = cb; cb = undefined; }
 		if (tid == null) tid = threadID;
 		const message = createLiveMessage(api, event, tid);
 		const run = replyID ? message.replyTo(form, replyID) : message.sendTo(form);
-		if (typeof cb === "function") return cbify(run.then(idOf), cb);
-		return run.then(idOf);
+		const tagged = run.then(result => idOf(result, tid));
+		if (typeof cb === "function") return cbify(tagged, cb);
+		return tagged;
 	}
 
 	const overrides = {
@@ -336,7 +483,7 @@ function createGoatApi(api, event) {
 		unsendMessage(messageID, cb) {
 			const run = new Promise((resolve, reject) => api.unsendMessage(messageID, threadID, (e, r) => e ? reject(e) : resolve(r)));
 			if (typeof cb === "function") return cbify(run, cb);
-			return run;
+			return quiet(run);
 		},
 		setMessageReaction(emoji, messageID, cb) {
 			const run = new Promise((resolve, reject) => api.setMessageReaction(emoji == null ? "" : emoji, messageID, threadID, (e, r) => e ? reject(e) : resolve(r)));
@@ -395,16 +542,38 @@ function createGoatApi(api, event) {
 		},
 		addUserToGroup(uid, tid, cb) {
 			if (typeof tid === "function") { cb = tid; tid = threadID; }
-			const run = new Promise((resolve, reject) => api.addUserToThread(String(uid), tid || threadID, (e, r) => e ? reject(e) : resolve(r)));
+			const run = ig.addUser(api, uid, tid || threadID);
 			if (typeof cb === "function") return cbify(run, cb);
 			return run;
 		},
 		removeUserFromGroup(uid, tid, cb) {
 			if (typeof tid === "function") { cb = tid; tid = threadID; }
-			const run = new Promise((resolve, reject) => api.removeUserFromThread(String(uid), tid || threadID, (e, r) => e ? reject(e) : resolve(r)));
+			const run = ig.removeUser(api, uid, tid || threadID);
 			if (typeof cb === "function") return cbify(run, cb);
 			return run;
 		},
+		// Same actions under the ig-chat-api names, so adduser/removeuser and the
+		// group commands work whichever name the installed build exposes.
+		addUserToThread(uid, tid, cb) { return overrides.addUserToGroup(uid, tid, cb); },
+		removeUserFromThread(uid, tid, cb) { return overrides.removeUserFromGroup(uid, tid, cb); },
+		follow(uid, cb) {
+			const run = ig.follow(api, uid);
+			if (typeof cb === "function") return cbify(run, cb);
+			return run;
+		},
+		unfollow(uid, cb) {
+			const run = ig.unfollow(api, uid);
+			if (typeof cb === "function") return cbify(run, cb);
+			return run;
+		},
+		/** Make the bot leave a group (Insta-Bot's `leave` uses deleteThread). */
+		leaveGroup(tid, cb) {
+			if (typeof tid === "function") { cb = tid; tid = threadID; }
+			const run = ig.leaveGroup(api, tid || threadID);
+			if (typeof cb === "function") return cbify(run, cb);
+			return run;
+		},
+		deleteThread(tid, cb) { return overrides.leaveGroup(tid, cb); },
 		getCurrentUserID: () => api.getCurrentUserID(),
 		getAppState: () => [],
 		setOptions: () => { }
@@ -444,7 +613,7 @@ function createLiveMessage(api, event, threadID) {
 
 function createGoatMessage(base, event) {
 	const wrap = (fn) => function (form, cb) {
-		const run = fn(normForm(form)).then(idOf);
+		const run = fn(normForm(form)).then(result => idOf(result, base.threadID));
 		if (typeof cb === "function") return cbify(run, cb);
 		return run;
 	};
@@ -453,7 +622,7 @@ function createGoatMessage(base, event) {
 		event,
 		reply: wrap(f => base.reply(f)),
 		send: wrap(f => base.send(f)),
-		unsend: (id, cb) => base.unsend(id || event.messageID, cb),
+		unsend: (id, cb) => quiet(base.unsend(id || event.messageID, cb)),
 		reaction: (emoji, id, cb) => base.react(emoji, id || event.messageID, cb),
 		react: (emoji, id, cb) => base.react(emoji, id || event.messageID, cb),
 		err: (error) => base.reply(`❌ ${error && error.message ? error.message : String(error)}`),
@@ -529,13 +698,13 @@ function buildContext(script, ctx) {
 		envCommands: global.GoatBot.configCommands.envCommands || {},
 		envGlobal: {},
 		envConfig: {},
-		globalData: { get: async () => ({}), set: async () => ({}) },
+		globalData: goatBotData.globalData,
 		dashBoardData: {},
 		isUserCallCommand: true
 	});
 }
 
-const goatBotData = { users: null, threads: null };
+const goatBotData = { users: null, threads: null, globalData: null };
 
 /**
  * Convert a GoatBot command into an InstaBOT command (mutates + returns it).
@@ -746,6 +915,7 @@ function install({ config, database, registry }) {
 	patchFacebookAvatars();
 	goatBotData.users = usersAdapter();
 	goatBotData.threads = threadsAdapter();
+	goatBotData.globalData = globalDataAdapter(database);
 
 	const configCommands = (() => {
 		try { return JSON.parse(fs.readFileSync(path.join(ROOT, "configCommands.json"), "utf8")); }

@@ -3,7 +3,7 @@ module.exports = {
     name: "tag",
     version: "3.0",
     category: "box chat",
-    role: 0,
+    role: 1,
     author: "CRX Shihab",
     countDown: 3,
     description: {

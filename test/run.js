@@ -2088,6 +2088,120 @@ async function main() {
 		assert.ok(api.calls.some(c => c.method === "removeUserFromThread" && c.uid === "9999"));
 	});
 
+	/* ── follow / unfollow / out / kick / antiout / listbox join (any ig-chat-api method names) ── */
+	for (const name of ["follow", "unfollow", "kick", "out", "antiout", "listbox"]) { const c = registry.resolve(name); if (c) c.config.cooldown = 0; }
+
+	await test("follow + unfollow: use the build's follow/unfollow and accept @tags and replies", async () => {
+		const h = await groupHarness({
+			follow: (id, cb) => { h.api.calls.push({ method: "follow", id }); cb && cb(null, {}); },
+			unfollow: (id, cb) => { h.api.calls.push({ method: "unfollow", id }); cb && cb(null, {}); }
+		});
+		await h.say("-follow 4242");
+		await h.say("-unfollow", { type: "message_reply", messageReply: { messageID: "o", senderID: "321" } });
+		await h.say("-follow @tagged", { mentions: { "777": "@tagged" } });
+		assert.ok(h.api.calls.some(c => c.method === "follow" && c.id === "4242"), "follow by id");
+		assert.ok(h.api.calls.some(c => c.method === "unfollow" && c.id === "321"), "unfollow by reply");
+		assert.ok(h.api.calls.some(c => c.method === "follow" && c.id === "777"), "follow by @tag");
+		assert.ok(/Followed 4242/.test(h.texts()) && /Unfollowed 321/.test(h.texts()), h.texts());
+	});
+
+	await test("follow: a build without follow says so instead of crashing", async () => {
+		const h = await groupHarness();
+		await h.say("-follow 4242");
+		assert.ok(/Failed to follow 4242/.test(h.texts()), h.texts());
+	});
+
+	await test("kick: works with removeUserFromGroup-only builds and reports the result", async () => {
+		const h = await groupHarness({
+			removeUserFromThread: undefined,
+			removeUserFromGroup: (uid, tid, cb) => { h.api.calls.push({ method: "removeUserFromGroup", uid, tid }); cb && cb(null, {}); },
+			getThreadInfo: (tid, cb) => cb(null, { participantIDs: ["999", "321"], adminIDs: [{ id: "100" }, { id: "999" }] })
+		});
+		h.api.getCurrentUserID = () => "100";
+		await h.say("-kick", { type: "message_reply", messageReply: { messageID: "o", senderID: "321" } });
+		assert.ok(h.api.calls.some(c => c.method === "removeUserFromGroup" && c.uid === "321" && c.tid === "G"), "kick call missing");
+		assert.ok(/Kicked 1/.test(h.texts()), h.texts());
+	});
+
+	await test("kick: refuses when the bot is a known non-admin", async () => {
+		const h = await groupHarness({ getThreadInfo: (tid, cb) => cb(null, { participantIDs: ["999", "321"], adminIDs: [{ id: "999" }] }) });
+		h.api.getCurrentUserID = () => "100";
+		await h.say("-kick 321");
+		assert.ok(/not an admin/i.test(h.texts()), h.texts());
+		assert.ok(!h.api.calls.some(c => c.method === "removeUserFromThread"));
+	});
+
+	await test("out: leaves through deleteThread and keeps a long thread id intact", async () => {
+		const tid = "340282366841710300949128149494123456";
+		const h = await groupHarness({ deleteThread: (id, cb) => { h.api.calls.push({ method: "deleteThread", id }); cb && cb(null, {}); } });
+		await h.say(`-out ${tid}`);
+		assert.ok(h.api.calls.some(c => c.method === "deleteThread" && c.id === tid), "deleteThread must get the exact id");
+		assert.ok(h.api.calls.some(c => c.method === "sendMessage" && c.threadID === tid), "goodbye goes to that group");
+	});
+
+	await test("out: falls back to removing the bot itself when there is no deleteThread", async () => {
+		const h = await groupHarness();
+		h.api.getCurrentUserID = () => "100";
+		await h.say("-out");
+		assert.ok(h.api.calls.some(c => c.method === "removeUserFromThread" && c.uid === "100" && c.threadID === "G"));
+	});
+
+	await test("out: a normal member cannot target another group", async () => {
+		const h = await groupHarness({ deleteThread: (id, cb) => { h.api.calls.push({ method: "deleteThread", id }); cb && cb(null, {}); } });
+		await h.say("-out 123456789012", { senderID: "5" });
+		assert.ok(!h.api.calls.some(c => c.method === "deleteThread"));
+	});
+
+	await test("listbox: left <n> leaves through the bot's leave method; join adds (follows first when refused)", async () => {
+		let addTries = 0;
+		const h = await groupHarness({
+			deleteThread: (id, cb) => { h.api.calls.push({ method: "deleteThread", id }); cb && cb(null, {}); },
+			getThreadInfo: (tid, cb) => cb(null, { participantIDs: ["1"] }),
+			addUserToThread: undefined,
+			addUserToGroup: (uid, tid, cb) => { addTries++; h.api.calls.push({ method: "addUserToGroup", uid, tid }); cb && cb(addTries === 1 ? new Error("user does not follow you") : null, {}); },
+			follow: (id, cb) => { h.api.calls.push({ method: "follow", id }); cb && cb(null, {}); }
+		});
+		await h.say("-listbox");
+		const listID = "m" + h.api.calls.length;
+		await h.say("left 1", { type: "message_reply", messageReply: { messageID: listID, senderID: "999" } });
+		assert.ok(h.api.calls.some(c => c.method === "deleteThread" && c.id === "g1"), "left 1 must leave g1");
+		await h.say("join 2", { type: "message_reply", messageReply: { messageID: listID, senderID: "999" } });
+		assert.ok(h.api.calls.some(c => c.method === "follow" && c.id === "999"), "bot should follow the user after a refused add");
+		assert.strictEqual(addTries, 2, "add retried once after following");
+		assert.ok(/Added to "Beta"/.test(h.texts()), h.texts());
+	});
+
+	await test("antiout: on/off is stored per group", async () => {
+		const h = await groupHarness();
+		await h.say("-antiout on");
+		assert.strictEqual(h.db.threads.get("G").settings.antiout, true);
+		await h.say("-antiout off");
+		assert.strictEqual(h.db.threads.get("G").settings.antiout, false);
+	});
+
+	await test("antiout: adds back a member who left by themselves, not one who was removed", async () => {
+		const h = await groupHarness({ getThreadInfo: (tid, cb) => cb(null, { participantIDs: ["999"] }) });
+		h.api.getCurrentUserID = () => "100";
+		await h.say("-antiout on");
+		const ev = require(path.join(root, "events/onAntiOut.js"));
+		const message = { send: async () => { } };
+		const run = event => ev.onEvent({ api: h.api, event: Object.assign({ type: "leave", threadID: "G" }, event), message, threadsData: h.db.threads });
+		await run({ userIDs: ["321"], senderID: "321" });
+		assert.ok(h.api.calls.some(c => c.method === "addUserToThread" && c.uid === "321" && c.threadID === "G"), "self-leaver must be re-added");
+		h.api.calls.length = 0;
+		await run({ userIDs: ["322"], senderID: "999" });
+		assert.ok(!h.api.calls.some(c => c.method === "addUserToThread"), "a removed member stays removed");
+		await run({ userIDs: ["100"], senderID: "100" });
+		assert.ok(!h.api.calls.some(c => c.method === "addUserToThread"), "never re-add the bot itself");
+	});
+
+	await test("antiout: does nothing while it is off", async () => {
+		const h = await groupHarness();
+		const ev = require(path.join(root, "events/onAntiOut.js"));
+		await ev.onEvent({ api: h.api, event: { type: "leave", threadID: "G", userIDs: ["321"], senderID: "321" }, message: { send: async () => { } }, threadsData: h.db.threads });
+		assert.ok(!h.api.calls.some(c => c.method === "addUserToThread"));
+	});
+
 	/* ── ai ── */
 	await test("ai: registered to NZ R with the ai alias", () => {
 		const command = registry.resolve("ai");

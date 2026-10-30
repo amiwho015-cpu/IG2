@@ -1,6 +1,26 @@
 const { createCanvas } = require('canvas');
 const fs = require('fs-extra');
 const path = require('path');
+const os = require('os');
+
+// Temp images live in the OS temp dir (commands/ can be read-only), and a read
+// stream whose file vanished must never become an unhandled 'error' event.
+function tmpImagePath() {
+    return path.join(os.tmpdir(), 'instabot-maze-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.png');
+}
+function readTemp(file) {
+    const stream = fs.createReadStream(file);
+    stream.on('error', () => { });
+    return stream;
+}
+function safeUnlink(file) {
+    try { fs.unlinkSync(file); } catch (_) { /* already gone */ }
+}
+// The handler to drop is the one for the message that was replied to (not the player's own message).
+function dropHandler(event) {
+    const id = event.messageReply && event.messageReply.messageID;
+    if (id != null) global.GoatBot.onReply.delete(id);
+}
 
 exports.config = {
     name: "maze",
@@ -380,7 +400,7 @@ exports.onStart = async ({ args, message, event, commandName }) => {
 
     const data = generateMazeImage(difficultyLevel);
     
-    const imagePath = path.join(__dirname, global.utils.randomString(4) + ".png");
+    const imagePath = tmpImagePath();
     
     const writeStream = fs.createWriteStream(imagePath);
     data.image.pipe(writeStream);
@@ -389,10 +409,10 @@ exports.onStart = async ({ args, message, event, commandName }) => {
 
     const reply = await message.reply({
         body: `🧩 Solve the maze! Difficulty: ${difficultyMessage}\n\n• Send your path in one message (e.g., ➡️➡️⬇️...)\n• A is the start, B is the end.\n• You have 3 attempts for wrong answers.`,
-        attachment: fs.createReadStream(imagePath)
+        attachment: readTemp(imagePath)
     });
     
-    fs.unlinkSync(imagePath);
+    safeUnlink(imagePath);
 
     global.GoatBot.onReply.set(reply.messageID, {
         commandName,
@@ -446,20 +466,20 @@ exports.onReply = async ({ message, event, Reply, usersData }) => {
             
             const data = generateMazeImage(15, grid, cols, solutionPath, null);
             
-            const imagePath = path.join(__dirname, global.utils.randomString(4) + ".png");
+            const imagePath = tmpImagePath();
             const writeStream = fs.createWriteStream(imagePath);
             data.image.pipe(writeStream);
             await new Promise((resolve) => writeStream.on('finish', resolve));
 
             await message.reply({
                 body: `🎉 Correct! You solved the maze and earned $${rewardAmount.toLocaleString()}! The solution is shown in green.`,
-                attachment: fs.createReadStream(imagePath)
+                attachment: readTemp(imagePath)
             });
-            fs.unlinkSync(imagePath);
-            global.GoatBot.onReply.delete(event.messageID);
+            safeUnlink(imagePath);
+            dropHandler(event);
         } catch (e) {
              message.reply(`🎉 You solved the maze! (Error crediting money: ${e.message})`);
-             global.GoatBot.onReply.delete(event.messageID);
+             dropHandler(event);
         }
         return;
     }
@@ -473,18 +493,18 @@ exports.onReply = async ({ message, event, Reply, usersData }) => {
 
         const data = generateMazeImage(5, grid, cols, null, null, currentCell, userPath);
         
-        const imagePath = path.join(__dirname, global.utils.randomString(4) + ".png");
+        const imagePath = tmpImagePath();
         const writeStream = fs.createWriteStream(imagePath);
         data.image.pipe(writeStream);
         await new Promise((resolve) => writeStream.on('finish', resolve));
 
-        global.GoatBot.onReply.delete(event.messageID);
+        dropHandler(event);
 
         const newReply = await message.reply({
             body: `✅ Correct path! Continue from your position.\n\n📍 Progress: ${fullCode.length}/${solution.length} moves\n🎯 Keep going to reach point B!`,
-            attachment: fs.createReadStream(imagePath)
+            attachment: readTemp(imagePath)
         });
-        fs.unlinkSync(imagePath);
+        safeUnlink(imagePath);
         
         global.GoatBot.onReply.set(newReply.messageID, Reply);
         return;
@@ -496,17 +516,17 @@ exports.onReply = async ({ message, event, Reply, usersData }) => {
         // GAME OVER
         const data = generateMazeImage(15, grid, cols, solutionPath, userPath);
         
-        const imagePath = path.join(__dirname, global.utils.randomString(4) + ".png");
+        const imagePath = tmpImagePath();
         const writeStream = fs.createWriteStream(imagePath);
         data.image.pipe(writeStream);
         await new Promise((resolve) => writeStream.on('finish', resolve));
 
         await message.reply({
             body: `❌ Game over! You ran out of attempts.\n\n✅ Correct solution shown in green\n❌ Your incorrect path shown in red`,
-            attachment: fs.createReadStream(imagePath)
+            attachment: readTemp(imagePath)
         });
-        fs.unlinkSync(imagePath);
-        global.GoatBot.onReply.delete(event.messageID);
+        safeUnlink(imagePath);
+        dropHandler(event);
     } else {
         // WRONG MOVE, ATTEMPTS REMAINING
         await message.reply(`❌ Wrong path or move! Try again from your last checkpoint.\n\n🔄 Attempts remaining: ${3 - Reply.attempts}`);

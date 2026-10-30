@@ -1,81 +1,88 @@
 const axios = require("axios");
 
-const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-hub";
-let apiBaseUrl = null;
-let apiConfigRequest = null;
-
-async function getApiBaseUrl() {
-  if (apiBaseUrl) return apiBaseUrl;
-
-  if (!apiConfigRequest) {
-    apiConfigRequest = axios
-      .get(API_CONFIG_URL, { timeout: 15000 })
-      .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
-
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
-        }
-
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
-        return apiBaseUrl;
-      })
-      .finally(() => {
-        apiConfigRequest = null;
-      });
-  }
-
-  return apiConfigRequest;
-}
-
 module.exports = {
   config: {
     name: "lyrics",
-    aliases: ["songlyrics"],
-    version: "2.0",
-    author: "CRX Shihab",
-    countDown: 5,
+    version: "3.2",
+    author: "Toshiro Editz",
     role: 0,
-    shortDescription: "Get song lyrics",
-    category: "tools",
-    guide: "{pn} [song name]"
+    shortDescription: "Search song lyrics",
+    category: "music"
   },
 
-  onStart: async function ({ api, event, args }) {
-    const { threadID, messageID } = event;
-    const songName = args.join(" ");
-
-    if (!songName) {
-      return api.sendMessage("╭─❍\n│ Please provide a song name!\n╰───────────⟡", threadID, messageID);
+  onStart: async function ({ message, args, event }) {
+    if (!args.length) {
+      return message.reply("❌ | Please provide a song title.");
     }
 
-    const waitMsg = await api.sendMessage(`🔍 | Searching lyrics for: ${songName}...`, threadID, messageID);
+    const title = args.join(" ");
 
     try {
-      const res = await axios.get(`${await getApiBaseUrl()}/api/lyrics?song=${encodeURIComponent(songName)}`);
-      
-      if (res.data.status && res.data.data) {
-        const { title, artist, lyrics } = res.data.data;
+      const res = await axios.get(
+        "https://toshiro-editz-api.vercel.app/search/lyricsv2",
+        { params: { title } }
+      );
 
-        const responseText = 
-`╭───────❍
-│  『 𝗦𝗢𝗡𝗚 𝗟𝗬𝗥𝗜𝗖𝗦 』
-╰───────────⟡
-🎵 𝗧𝗶𝘁𝗹𝗲  : ${title}
-👤 𝗔𝗿𝘁𝗶𝘀𝘁 : ${artist}
-
-📜 𝗟𝘆𝗿𝗶𝗰𝘀 :
-━━━━━━━━━━━━━━━━━━
-${lyrics}
-━━━━━━━━━━━━━━━━━━`;
-
-        return api.editMessage(responseText, waitMsg.messageID);
-      } else {
-        throw new Error();
+      const data = res.data?.data;
+      if (!data || data.length === 0) {
+        return message.reply("😢 | No lyrics found for this song.");
       }
+
+      const options = data.slice(0, 3);
+
+      let text = "╭── 🎶 LYRICS SEARCH ──╮\n│\n";
+      options.forEach((s, i) => {
+        text += `│ ${i + 1}️⃣  ${s.trackName}\n│    └─ ${s.artistName}\n│\n`;
+      });
+      text += "╰─ Reply: 1 / 2 / 3 ─╯";
+
+      message.reply(text, (err, info) => {
+        if (err) return;
+
+        global.GoatBot.onReply.set(info.messageID, {
+          commandName: "lyrics",
+          author: event.senderID,
+          data: options,
+          optionMsgID: info.messageID
+        });
+      });
+
     } catch (error) {
-      return api.editMessage(`✕ Could not find lyrics for "${songName}"!`, waitMsg.messageID);
+      console.error(error);
+      message.reply("❌ | Failed to fetch lyrics. Please try again later.");
+    }
+  },
+
+  onReply: async function ({ event, message, Reply, api }) {
+    if (event.senderID !== Reply.author) return;
+
+    const index = parseInt(event.body);
+    if (isNaN(index) || index < 1 || index > 3) return;
+
+    const song = Reply.data[index - 1];
+
+    // 🔥 Auto delete option message
+    api.unsendMessage(Reply.optionMsgID);
+
+    if (!song.plainLyrics) {
+      return message.reply("😢 | Lyrics not available.");
+    }
+
+    const lines = song.plainLyrics.split("\n");
+    const chunkSize = 100;
+
+    for (let i = 0; i < lines.length; i += chunkSize) {
+      const chunk = lines
+        .slice(i, i + chunkSize)
+        .map(line => `│ ${line}`)
+        .join("\n");
+
+      const msg =
+`╭── 📜 LYRICS ──╮
+${chunk}
+╰───────────╯`;
+
+      await message.reply(msg);
     }
   }
 };

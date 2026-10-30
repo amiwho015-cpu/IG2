@@ -75,4 +75,48 @@ async function bestPicture(urls) {
 	return { buffer: best.buffer, width: best.width, height: best.height, url: best.url, ext };
 }
 
-module.exports = { bestPicture, imageSize, upsizedVariants };
+/** The bot's own Instagram cookies as a Cookie header (empty when none). */
+function botCookieHeader() {
+	try {
+		const cfg = require("./config");
+		const keep = ["sessionid", "ds_user_id", "csrftoken", "mid", "ig_did", "ig_nrcb", "datr"];
+		return cfg.loadAccount().filter(c => keep.includes(c.key)).map(c => `${c.key}=${c.value}`).join("; ");
+	}
+	catch (_) { return ""; }
+}
+
+/**
+ * Best (HD) profile picture for a user id: asks Instagram's private user-info
+ * endpoint (needs the bot's cookies) for hd_profile_pic_versions, then keeps the
+ * sharpest of those and any fallback URLs. Returns null if nothing downloads.
+ * @param {string} userID
+ * @param {string[]} fallbackUrls
+ */
+async function hdProfilePicture(userID, fallbackUrls = []) {
+	const candidates = [];
+	const cookie = botCookieHeader();
+	if (userID && cookie.includes("sessionid=")) {
+		try {
+			const axios = require("axios");
+			const res = await axios.get(`https://i.instagram.com/api/v1/users/${userID}/info/`, {
+				timeout: 15000,
+				headers: {
+					"User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)",
+					"X-IG-App-ID": "936619743392459", Accept: "*/*", Cookie: cookie
+				}
+			});
+			const u = res.data && res.data.user;
+			if (u) {
+				const versions = Array.isArray(u.hd_profile_pic_versions) ? u.hd_profile_pic_versions : [];
+				candidates.push(
+					u.hd_profile_pic_url_info && u.hd_profile_pic_url_info.url,
+					...versions.slice().sort((a, b) => (b.width || 0) - (a.width || 0)).map(v => v && v.url)
+				);
+			}
+		}
+		catch (_) { /* fall back to the URLs we already have */ }
+	}
+	return bestPicture([...candidates, ...fallbackUrls]);
+}
+
+module.exports = { bestPicture, hdProfilePicture, imageSize, upsizedVariants };

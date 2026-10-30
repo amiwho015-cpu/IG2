@@ -38,26 +38,46 @@ async function listGroups(api, threadsData) {
 		}
 		catch (_) { /* nothing more to try */ }
 	}
-	return groups;
+	// Stable order so a serial number keeps pointing at the same group between commands.
+	return groups.sort((a, b) => String(a.threadID).localeCompare(String(b.threadID), "en", { numeric: true }));
 }
 
-/** Group message requests that are waiting for the bot. */
+/** Groups already approved/refused from `pending` this session (Instagram can keep listing them for a while). */
+const handled = new Set();
+function markHandled(threadID) { handled.add(String(threadID)); }
+
+/**
+ * Group message requests that are waiting for the bot. Instagram's request
+ * folders can echo back groups the bot is already in, so anything that is in
+ * the normal inbox (or was just approved/refused) is removed here.
+ */
 async function listPending(api) {
+	const inbox = new Set();
+	try { for (const t of await fetchFolder(api, "INBOX", 500)) inbox.add(t.threadID); }
+	catch (_) { /* cannot tell the inbox apart: show the request list as is */ }
+
 	const out = [];
 	const seen = new Set();
 	let lastError = null;
+	let reached = false;
 	for (const folder of ["PENDING", "OTHER"]) {
 		try {
 			for (const t of await fetchFolder(api, folder, 100)) {
+				reached = true;
 				if (!t.isGroup || seen.has(t.threadID)) continue;
 				seen.add(t.threadID);
+				if (inbox.has(t.threadID) || handled.has(t.threadID)) continue;
 				out.push(t);
 			}
 		}
 		catch (error) { lastError = error; }
 	}
-	if (!out.length && lastError) throw lastError;
+	if (!reached && lastError) throw lastError;
 	return out;
 }
 
-module.exports = { normalise, listGroups, listPending };
+// Add / follow / membership logic lives in igActions so every build's method
+// names are tried (see that file).
+const { joinUser } = require("./igActions");
+
+module.exports = { normalise, listGroups, listPending, markHandled, joinUser };

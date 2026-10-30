@@ -4,7 +4,7 @@ module.exports = {
 		version: "1.2",
 		author: "CRX Shihab",
 		countDown: 60,
-		role: 0,
+		role: 1,
 		description: {
 			vi: "làm mới thông tin nhóm chat hoặc người dùng",
 			en: "refresh information of group chat or user"

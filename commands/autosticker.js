@@ -1,135 +1,93 @@
-const cooldowns = {};
+// autosticker: when someone sends a sticker/GIF in a group, the bot sends it back.
+//
+// Instagram has no API for a bot to send one of its own stickers, so the bot
+// downloads the sticker that was just sent and posts it back as an image.
+// Off by default; a group admin turns it on with "autosticker on".
+
+const COOLDOWN_MS = 4000; // per group, so two bots / fast stickers cannot loop or spam
+const lastReply = new Map(); // threadID -> time of the last reply
+const debugThreads = new Set();
+
+const STICKER_TYPES = ["sticker", "animated_image", "animated_media", "gif", "giphy", "avatar_sticker"];
+
+function findSticker(attachments) {
+	if (!Array.isArray(attachments)) return null;
+	return attachments.find(att => {
+		if (!att || typeof att !== "object") return false;
+		const type = String(att.type || "").toLowerCase();
+		return STICKER_TYPES.includes(type) || type.includes("sticker");
+	}) || null;
+}
+
+function urlOf(att) {
+	return att.url || att.largePreviewUrl || att.previewUrl || att.image_url || att.imageUrl || att.thumbnail || null;
+}
 
 module.exports = {
-  config: {
-    name: "autosticker",
-    version: "5.4",
-    author: "CRX Shihab",
-    countDown: 5,
-    role: 0,
-    description: "Send a random sticker with cooldown. Reply-stickers are ignored.",
-    category: "IMAGE",
-    guide: ""
-  },
+	config: {
+		name: "autosticker",
+		aliases: ["autostk"],
+		version: "1.0",
+		author: "CRX Shihab",
+		countDown: 3,
+		role: 1,
+		shortDescription: { en: "Reply to stickers with a sticker" },
+		longDescription: { en: "When a member sends a sticker or GIF, the bot sends it back." },
+		category: "BOX CHAT",
+		guide: { en: "{pn} on | off | status | debug" }
+	},
 
-  onChat: async function ({ message, event, api }) {
-    const { attachments, body, senderID, messageReply } = event;
+	onStart: async function ({ args, event, message, threadsData }) {
+		const threadID = event.threadID;
+		const action = String(args[0] || "status").toLowerCase();
+		const enabled = !!(await threadsData.get(threadID, "data.autosticker", false));
 
-    const stickerList = [
-      "997237917529747",
-      "610031329418350",
-      "610502019371281",
-      "610569272697889",
-      "610569976031152",
-      "476425823021014",
-      "476426593020937",
-      "476429343020662",
-      "476425429687720",
-      "1303078524468983",
-      "1303078351135667",
-      "1303076361135866",
-      "1303077221135780",
-      "587748556953567",
-      "587538733641216",
-      "587532536975169",
-      "587534000308356",
-      "8298078730277844",
-      "2041012262792914",
-      "788171644590353",
-      "2041021119458695",
-      "456545803421865",
-      "2041015016125972",
-      "456536873422758",
-      "456539756755803",
-      "456538446755934",
-      "456537923422653",
-      "551710548197410",
-      "3258106924322842",
-      "3258108400989361",
-      "529234074205621",
-      "2041012539459553",
-      "2041012109459596",
-      "2041011389459668",
-      "2041011836126290",
-      "2041012406126233",
-      "1653957535190146",
-      "1653961838523049",
-      "1653958728523360",
-      "1653959815189918",
-      "1653959108523322",
-      "840346298329699",
-      "840349011662761",
-      "840417168322612",
-      "840348028329526",
-      "840423774988618",
-      "840426104988385",
-      "840425448321784",
-      "840426894988306",
-      "840422048322124",
-      "840420931655569",
-      "615093244500568",
-      "615113087831917",
-      "615161037827122",
-      "61516142782708",
-      "615162151160344",
-      "615161654493727",
-      "615161251160434",
-      "114314139163194",
-      "392309937532985",
-      "392309890866323",
-      "392309637533015",
-      "392309990866313",
-      "392309957532983",
-      "392309834199662",
-      "392310044199641",
-      "392309624199683",
-      "1237285867479080",
-      "1350643753441450",
-      "1351316753374150",
-      "237317987087861",
-      "237318230421170",
-      "237320883754238",
-      "237320150420978",
-      "392309714199674",
-      "840419971655665",
-      "840344401663222",
-      "8298125910273126",
-      "8298107380274979",
-      "8298115103607540",
-      "392309800866332",
-      "1241305557077111",
-      "1237285187479148",
-      "456545143421931",
-      "456542403422205",
-      "1747088982269020",
-      "1747084572269461",
-      "840424478321881"
-    ];
+		if (action === "on") {
+			await threadsData.set(threadID, true, "data.autosticker");
+			return message.reply("✅ AutoSticker is ON. I will send a sticker back when someone sends one.");
+		}
+		if (action === "off") {
+			await threadsData.set(threadID, false, "data.autosticker");
+			return message.reply("❌ AutoSticker is OFF.");
+		}
+		if (action === "debug") {
+			// Prints what Instagram sends for a sticker, in the console, so the detection can be tuned.
+			if (debugThreads.has(String(threadID))) { debugThreads.delete(String(threadID)); return message.reply("🔧 Debug OFF."); }
+			debugThreads.add(String(threadID));
+			return message.reply("🔧 Debug ON. Send a sticker, then look at the bot console for [AUTOSTICKER DEBUG].");
+		}
+		return message.reply(`📌 AutoSticker: ${enabled ? "✅ ON" : "❌ OFF"}\nUse: autosticker on | off | debug`);
+	},
 
-    if (senderID === api.getCurrentUserID()) return;
+	onChat: async function ({ api, event, message, threadsData }) {
+		const attachments = event.attachments;
+		if (!Array.isArray(attachments) || !attachments.length) return;
+		const threadID = String(event.threadID);
 
-    if (body?.toLowerCase() === "autosticker list")
-      return message.reply(`📊 Total stickers: ${stickerList.length}`);
+		if (debugThreads.has(threadID)) {
+			console.log("[AUTOSTICKER DEBUG]", JSON.stringify(attachments.map(a => ({ type: a && a.type, keys: a && Object.keys(a), url: a && urlOf(a) }))));
+		}
 
-    if (body?.toLowerCase() === "autosticker listall") {
-      let msg = "📜 𝗔𝗹𝗹 𝗦𝘁𝗶𝗰𝗸𝗲𝗿 𝗜𝗗𝘀\n━━━━━━━━━━━━━━━━━━━━\n";
-      stickerList.forEach((id, i) => msg += `${i + 1}. ${id}\n`);
-      msg += `\n📊 𝗧𝗼𝘁𝗮𝗹: ${stickerList.length}`;
-      return message.reply(msg);
-    }
+		const botID = api && typeof api.getCurrentUserID === "function" ? String(api.getCurrentUserID()) : null;
+		if (botID && String(event.senderID) === botID) return;
 
-    const isSticker = attachments?.some(a => a.type === "sticker");
-    if (!isSticker) return;
+		const sticker = findSticker(attachments);
+		if (!sticker) return;
+		if (!(await threadsData.get(threadID, "data.autosticker", false))) return;
 
-    if (messageReply) return;
+		const now = Date.now();
+		if (now - (lastReply.get(threadID) || 0) < COOLDOWN_MS) return;
+		lastReply.set(threadID, now);
 
-    const now = Date.now();
-    if (cooldowns[senderID] && now - cooldowns[senderID] < 5000) return;
-    cooldowns[senderID] = now;
-
-    const randomSticker = stickerList[Math.floor(Math.random() * stickerList.length)];
-    return message.reply({ sticker: randomSticker });
-  },
-
-  onStart: async function () {}
+		const url = urlOf(sticker);
+		try {
+			if (!url) throw new Error("sticker has no url");
+			const stream = await global.utils.getStreamFromURL(url);
+			await message.reply({ attachment: stream });
+		}
+		catch (error) {
+			console.log("[AUTOSTICKER] could not send the sticker back:", error && error.message);
+			try { await message.react("😄"); } catch (_) { /* reaction is only a fallback */ }
+		}
+	}
 };

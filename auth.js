@@ -54,6 +54,7 @@ const METHODS = [
 	"sendTextEffect", "sendAvatarTextEffect", "sendMusic", "musicSearch",
 	"sendTypingIndicator", "stopTypingIndicator", "setMessageReaction", "unsendMessage", "deleteMessage",
 	"markAsRead", "markAsDelivered", "setTitle", "addUserToThread", "removeUserFromThread",
+	"addUserToGroup", "removeUserFromGroup", "deleteThread", "leaveThread", "follow", "unfollow",
 	"changeThreadMute", "changeBio", "changeProfilePicture", "changeAvatar",
 	"getAppState", "setOptions", "logout"
 ];

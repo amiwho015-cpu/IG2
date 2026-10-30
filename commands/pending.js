@@ -1,6 +1,22 @@
 "use strict";
 
-const { listPending } = require("../src/groupUtil");
+const fs = require("fs");
+const { listPending, markHandled } = require("../src/groupUtil");
+
+// When whitelist-thread mode is ON, a group the owner approves must also be
+// whitelisted, otherwise the bot would stay silent in it.
+function whitelistThread(threadID) {
+	try {
+		const cfg = global.GoatBot && global.GoatBot.config;
+		const wt = cfg && cfg.whiteListModeThread;
+		if (!wt || wt.enable !== true) return;
+		if (!Array.isArray(wt.whiteListThreadIds)) wt.whiteListThreadIds = [];
+		if (wt.whiteListThreadIds.map(String).includes(String(threadID))) return;
+		wt.whiteListThreadIds.push(String(threadID));
+		fs.writeFileSync(global.client.dirConfig, JSON.stringify(cfg, null, 2));
+	}
+	catch (_) { /* best effort */ }
+}
 
 module.exports = {
 	config: {
@@ -59,6 +75,8 @@ module.exports = {
 					try { await api.handleMessageRequest(target.threadID, true); } catch (_) { /* not available on Instagram */ }
 					await api.sendMessage(`✅ ${botName} activated!\n🔗 Prefix: ${prefix}\nType ${prefix}help to see the commands.`, target.threadID);
 				}
+				markHandled(target.threadID);
+				if (!refuse) whitelistThread(target.threadID);
 				done++;
 			}
 			catch (error) {

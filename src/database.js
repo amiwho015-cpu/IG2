@@ -7,11 +7,13 @@
 
 const fs = require("fs");
 const path = require("path");
+const { GitHubSync } = require("./githubSync");
 
 class Store {
-	constructor(file, defaults) {
+	constructor(file, defaults, onWrite) {
 		this.file = file;
 		this.defaults = defaults;
+		this.onWrite = typeof onWrite === "function" ? onWrite : null; // called after every local save (GitHub push hook)
 		this.data = {};
 		this._writeTimer = null;
 		this._load();
@@ -44,6 +46,7 @@ class Store {
 			const tmp = this.file + ".tmp";
 			fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
 			fs.renameSync(tmp, this.file);
+			if (this.onWrite) this.onWrite();
 		}
 		catch (error) {
 			// Never swallow this: a read-only disk or a full volume would otherwise
@@ -93,6 +96,25 @@ function createDatabase(config) {
 	const dir = path.join(path.resolve(__dirname, ".."), config.database.dir);
 	fs.mkdirSync(dir, { recursive: true });
 
+	// ---- GitHub storage (instead of a hosted database) -------------------
+	const gh = (config.database && config.database.github) || {};
+	const log = require("./logger");
+	const sync = new GitHubSync({
+		token: process.env.GITHUB_TOKEN || gh.token,
+		repo: process.env.GITHUB_REPO || gh.repo,
+		branch: process.env.GITHUB_BRANCH || gh.branch,
+		path: process.env.GITHUB_PATH || gh.path,
+		pushDelayMs: gh.pushDelayMs,
+		log: { info: (t, m) => log.info(t, m), warn: (t, m) => log.warn(t, m) }
+	});
+	const root = path.resolve(__dirname, "..");
+	sync.register("users.json", path.join(dir, "users.json"));
+	sync.register("threads.json", path.join(dir, "threads.json"));
+	// Extra files that commands write on their own (relative to the project root).
+	// Always synced: autoreact settings and the nix chat memory. config.json can add more.
+	const extra = [...new Set(["commands/cache/autoreact.json", "data/nix-memory.json", "data/shihab-memory.json", ...(Array.isArray(gh.extraFiles) ? gh.extraFiles : [])])];
+	for (const rel of extra) sync.register(rel, path.join(root, rel));
+
 	const users = new Store(path.join(dir, "users.json"), {
 		userID: null,
 		name: null,
@@ -101,7 +123,7 @@ function createDatabase(config) {
 		banned: { status: false, reason: null, date: null },
 		settings: {},
 		data: {}
-	});
+	}, () => sync.markDirty("users.json"));
 
 	const threads = new Store(path.join(dir, "threads.json"), {
 		threadID: null,
@@ -114,15 +136,34 @@ function createDatabase(config) {
 		adminIDs: [],
 		settings: {},
 		data: {}
-	});
+	}, () => sync.markDirty("threads.json"));
 
 	return {
 		dir,
 		users,
 		threads,
+		sync,
+		/** Call once before commands load: pulls saved data from GitHub. */
+		async init() {
+			if (!sync.enabled) {
+				log.warn("GITHUB", "GitHub storage is OFF (set GITHUB_TOKEN and GITHUB_REPO=owner/repo). Data is only saved on local disk.");
+				return;
+			}
+			await sync.hydrate();
+			users._load();
+			threads._load();
+			sync.watchFiles(extra);
+			log.info("GITHUB", `storage ON -> ${sync.repo}@${sync.branch}/${sync.prefix}`);
+		},
 		flush() {
 			users.flush();
 			threads.flush();
+		},
+		/** Shutdown: save locally, then push everything to GitHub. */
+		async flushRemote() {
+			users.flush();
+			threads.flush();
+			await sync.flushAll();
 		}
 	};
 }

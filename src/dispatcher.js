@@ -61,11 +61,36 @@ function createDispatcher({ api, config, registry, database }) {
 		return role;
 	}
 
+	// The whitelist commands (wl / whitelistthread) store their lists on the live
+	// GoatBot config (whiteListMode / whiteListModeThread). Read that object so
+	// switching them on really restricts the bot instead of only saving a flag.
+	function liveConfig() {
+		return (global.GoatBot && global.GoatBot.config) || config;
+	}
+
 	function allowedByWhitelist(event) {
-		if (!config.whiteList.enable) return true;
 		const senderID = senderIDOf(event);
 		if (isBotAdmin(senderID)) return true;
-		return config.whiteList.userIDs.includes(senderID) || config.whiteList.threadIDs.includes(String(event.threadID));
+		if (config.whiteList.enable &&
+			!config.whiteList.userIDs.includes(senderID) && !config.whiteList.threadIDs.includes(String(event.threadID)))
+			return false;
+		const wu = liveConfig().whiteListMode;
+		if (wu && wu.enable === true) {
+			const ids = Array.isArray(wu.whiteListIds) ? wu.whiteListIds.map(String) : [];
+			if (!ids.includes(senderID)) return false;
+		}
+		return true;
+	}
+
+	// Whitelist-thread mode: while ON, only bot admins can use the bot in group
+	// threads that are not on the whitelist. Direct chats are not affected.
+	function allowedByThreadWhitelist(event, group) {
+		if (group && group.known && !group.isGroup) return true;
+		const wt = liveConfig().whiteListModeThread;
+		if (!wt || wt.enable !== true) return true;
+		if (isBotAdmin(senderIDOf(event))) return true;
+		const ids = Array.isArray(wt.whiteListThreadIds) ? wt.whiteListThreadIds.map(String) : [];
+		return ids.includes(String(event.threadID));
 	}
 
 	function cooldownRemaining(command, senderID) {
@@ -79,9 +104,29 @@ function createDispatcher({ api, config, registry, database }) {
 		return 0;
 	}
 
-	function registerOnReply(messageID, commandName, handler) {
-		onReply.set(String(messageID), { commandName, handler, at: Date.now() });
+	/**
+	 * Arm a reply handler. `options.persistent` keeps it armed after a reply
+	 * (GoatBot semantics: the command removes it itself via
+	 * `global.GoatBot.onReply.delete(id)`), which games need so that a wrong
+	 * answer / invalid input does not kill the round. `options.threadID` lets the
+	 * dispatcher fall back to the thread's latest handler when Instagram reports
+	 * a different id for a media message than the one the send call returned.
+	 */
+	function registerOnReply(messageID, commandName, handler, options) {
+		const opts = options || {};
+		onReply.set(String(messageID), {
+			commandName, handler, at: Date.now(),
+			persistent: opts.persistent === true,
+			fallback: opts.fallback === true,
+			author: opts.author != null ? String(opts.author) : null,
+			bodyMatch: opts.bodyMatch ? String(opts.bodyMatch).replace(/\s+/g, " ").trim() : null,
+			threadID: opts.threadID != null ? String(opts.threadID) : null
+		});
 		return handler;
+	}
+
+	function unregisterOnReply(messageID) {
+		return onReply.delete(String(messageID));
 	}
 
 	function registerOnReaction(messageID, commandName, handler) {
@@ -121,6 +166,26 @@ function createDispatcher({ api, config, registry, database }) {
 			}
 		}
 		return rows[b.length];
+	}
+
+	const DENY_TEXT = "This Group is Locked. plesse Contact bot owner\nOwner: @who_shihab2026";
+
+	/** True when at least one bot admin is a member of this group. Unknown member list = not allowed. */
+	async function groupHasBotAdmin(event, threadData) {
+		const ids = new Set();
+		const add = list => { if (Array.isArray(list)) for (const id of list) if (id != null && String(id)) ids.add(String(id)); };
+		add(event.participantIDs); add(event.userIDs); add(threadData && threadData.members);
+		if (!ids.size) {
+			try {
+				const info = await new Promise((resolve, reject) =>
+					api.getThreadInfo(event.threadID, (error, result) => error ? reject(error) : resolve(result)));
+				add(info && info.participantIDs); add(info && info.userIDs);
+				if (ids.size && threadData) threadData.members = [...ids];
+			}
+			catch (_) { /* could not load members */ }
+		}
+		for (const id of ids) if (isBotAdmin(id)) return true;
+		return false;
 	}
 
 	async function runCommands(event, message, threadData, userData) {
@@ -169,6 +234,22 @@ function createDispatcher({ api, config, registry, database }) {
 			if (!config.hideNotiMessage.adminOnly)
 				return message.reply(t(config.language, "onlyAdminBot", commandName));
 			return;
+		}
+
+		// help2 commands (every category except anime / image / media; `help` stays open):
+		//  1. `-onlyadmin on`  -> bot admins only.
+		//  2. Even with onlyadmin OFF, they only work in groups where a bot admin
+		//     is a member. Anyone else gets the "Group is Locked" reply.
+		if (!isBotAdmin(senderID) && commandName !== "help") {
+			const { MAIN_CATEGORIES, cleanCategoryName } = require("./helpMenu");
+			if (!MAIN_CATEGORIES.has(cleanCategoryName(command.config.category))) {
+				const blocked = liveConfig().onlyAdminMore === true ||
+					(event.isGroup !== false && !(await groupHasBotAdmin(event, threadData)));
+				if (blocked) {
+					if (!config.hideNotiMessage.adminOnly) return message.reply(DENY_TEXT);
+					return;
+				}
+			}
 		}
 
 		const role = roleOf(event, threadData);
@@ -240,15 +321,77 @@ function createDispatcher({ api, config, registry, database }) {
 		}
 	}
 
+	/**
+	 * Find the handler a reply is aimed at. Exact message-id match first. If that
+	 * fails for a reply to one of the BOT's own media messages (Instagram can
+	 * report an image under a different id than the send call returned, and a
+	 * media-only message carries no text), fall back to the newest persistent
+	 * image-game handler armed in this thread by that same player, so a game
+	 * keeps working instead of silently ignoring the player. Replies to text
+	 * messages never use the fallback.
+	 */
+	function findReplyEntry(event) {
+		const replied = event.messageReply;
+		if (!replied) return null;
+		const repliedID = replied.messageID != null ? String(replied.messageID) : null;
+		if (repliedID && onReply.has(repliedID)) return { id: repliedID, entry: onReply.get(repliedID) };
+
+		// Instagram reports a sent message under a different id format (numeric item id vs "mid.$...")
+		// than the send call returned, so an exact id match can miss. A reply to one of the bot's TEXT
+		// messages is then matched by the quoted text itself (handlers opt in with `replyBody`).
+		if (replied.body && String(replied.body).trim()) {
+			const quoted = String(replied.body).replace(/\s+/g, " ").trim();
+			const body0 = typeof event.body === "string" ? event.body : "";
+			if (!(config.prefix && body0.startsWith(config.prefix))) {
+				const tid = String(event.threadID);
+				const sid = senderIDOf(event);
+				let hit = null;
+				for (const [id, entry] of onReply) {
+					if (!entry.persistent || !entry.bodyMatch || entry.bodyMatch !== quoted) continue;
+					if (entry.threadID !== tid) continue;
+					if (entry.author && entry.author !== sid) continue;
+					if (Date.now() - (entry.at || 0) > HANDLER_TTL_MS) continue;
+					if (!hit || entry.at >= hit.entry.at) hit = { id, entry };
+				}
+				if (hit) { log.warn("REPLY", `reply to ${repliedID || "unknown id"} matched by text; using ${hit.entry.commandName} handler (${hit.id})`); return hit; }
+			}
+		}
+
+		const botID = api && typeof api.getCurrentUserID === "function" ? String(api.getCurrentUserID()) : null;
+		const repliedToBot = !replied.senderID || (botID && String(replied.senderID) === botID);
+		const hasMedia = Array.isArray(replied.attachments) && replied.attachments.length > 0;
+		// Instagram sometimes reports the bot's own image with a different sender id format, so an
+		// attachment-only message still counts as the bot's when it carries media and no text.
+		if (!repliedToBot && !hasMedia) return null;
+		if (replied.body && String(replied.body).trim()) return null; // text message: exact id or nothing
+		// A reply that is really a command ("-help" swiped onto a bot message) must stay a command.
+		const body = typeof event.body === "string" ? event.body : "";
+		if (config.prefix && body.startsWith(config.prefix)) return null;
+
+		const threadID = String(event.threadID);
+		const senderID = senderIDOf(event);
+		let best = null;
+		for (const [id, entry] of onReply) {
+			// Only handlers armed on an image post, only in this thread, and only for the player who owns the game.
+			if (!entry.persistent || !entry.fallback || entry.threadID !== threadID) continue;
+			if (entry.author && entry.author !== senderID) continue;
+			if (Date.now() - (entry.at || 0) > HANDLER_TTL_MS) continue;
+			if (!best || entry.at >= best.entry.at) best = { id, entry };
+		}
+		if (best) log.warn("REPLY", `reply to ${repliedID || "unknown id"} matched no handler; using the latest ${best.entry.commandName} handler in this thread (${best.id})`);
+		return best;
+	}
+
 	async function runReplyHandlers(event, message, threadData, userData) {
-		const repliedID = event.messageReply && event.messageReply.messageID;
-		if (!repliedID) return false;
-		const entry = onReply.get(String(repliedID));
-		if (!entry) return false;
-		// One-shot: consume the handler so the map cannot grow without bound.
-		// A handler that wants to keep a conversation going re-arms a new handler
-		// via setReplyHandler (the AI command does this), so nothing is lost.
-		onReply.delete(String(repliedID));
+		const found = findReplyEntry(event);
+		if (!found) return false;
+		const entry = found.entry;
+		// Plain (non-GoatBot) handlers are one-shot: consume them so the map cannot
+		// grow without bound; a handler that wants to keep a conversation going
+		// re-arms itself via setReplyHandler (the AI command does this). GoatBot
+		// handlers are persistent and removed by the command itself.
+		if (!entry.persistent) onReply.delete(found.id);
+		else entry.at = Date.now();
 
 		// A banned user must not drive an armed handler (AI chat, sing/roll pick…)
 		// just because they replied instead of typing a command. Consume the
@@ -408,6 +551,8 @@ function createDispatcher({ api, config, registry, database }) {
 		threadData.isGroup = group.isGroup;
 		if (group.known) threadData.groupKnown = true;
 
+		if (!allowedByThreadWhitelist(event, group)) return;
+
 		const message = createMessageContext({ api, event, log });
 
 		switch (event.type) {
@@ -431,7 +576,7 @@ function createDispatcher({ api, config, registry, database }) {
 		database.users.flush();
 	}
 
-	return { handle, roleOf, registerOnReply, registerOnReaction, ROLE_USER, ROLE_ADMIN_BOX, ROLE_ADMIN_BOT };
+	return { handle, roleOf, registerOnReply, unregisterOnReply, registerOnReaction, ROLE_USER, ROLE_ADMIN_BOX, ROLE_ADMIN_BOT };
 }
 
 module.exports = { createDispatcher, ROLE_USER, ROLE_ADMIN_BOX, ROLE_ADMIN_BOT };

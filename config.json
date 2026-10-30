@@ -15,8 +15,8 @@
     "url": "https://nkx-ica.neokex.xyz",
     "token": "chat.api.toke.neokex.ica.token.can.change.a9y.2ime.ok",
     "timeout": 60000,
-    "mode": "direct",
-    "notes": "The shared ig-chat-api-server. url + token are the SAME for every bot and are intentionally global: one server hosts many accounts. Each bot is identified by the Instagram account id (ds_user_id) inside its own cookies, which it pushes to the server; the server returns that id and the bot adopts it. There is no per-bot id and no per-bot token. Point these at your own server instead only if you run a separate deployment (IG_API_SERVER / IG_API_TOKEN override whatever is here). server.mode: \"direct\" logs in through the local @lazyneoaz/ig-chat-api package (like Insta-Bot3) and ignores url/token; set \"server\" (or IG_MODE=server) to use the hosted server again."
+    "mode": "instachat",
+    "notes": "Default mode \"instachat\" uses the built-in lib/instachat-api (cookies only: IG_COOKIES env or account.txt). The old hosted ICA server is dead. \"direct\" needs the private @lazyneoaz/ig-chat-api package; \"server\" needs url+token of your own ig-chat-api-server. IG_MODE overrides this."
   },
   "account": {
     "proxy": null,
@@ -36,7 +36,9 @@
     "message": "Welcome %1 to %2! 👋",
     "threadIDs": [],
     "selfMessage": "Thanks for inviting me to %2 💋. Type {prefix}help to see all available commands.",
-    "notes": "Greet members added to a group thread. %1 = the new member, %2 = the thread name. selfMessage is sent when the BOT itself is added ({prefix} = the live prefix, %2 = the group name). Leave threadIDs empty for every thread, or list the thread IDs to limit it."
+    "notes": "Greet members added to a group thread. %1 = the new member, %2 = the thread name. selfMessage is sent when the BOT itself is added ({prefix} = the live prefix, %2 = the group name). Leave threadIDs empty for every thread, or list the thread IDs to limit it. card: picture sent with the text (\"welcard\" or \"welcome\" = toshiro canvas API, false = text only). fallbackScan: also greet members found by watching the member list when Instagram sends no join event.",
+    "card": "welcard",
+    "fallbackScan": true
   },
   "leave": {
     "enable": true,
@@ -86,7 +88,17 @@
   "database": {
     "dir": "data",
     "autoRefreshThreadInfo": true,
-    "notes": "Simple JSON storage for users and threads. Files are created automatically."
+    "github": {
+      "token": "",
+      "repo": "",
+      "branch": "main",
+      "path": "bot-data",
+      "extraFiles": [
+        "commands/cache/autoreact.json"
+      ],
+      "notes": "Saves users/threads to a GitHub repo so data survives redeploys. Prefer env vars GITHUB_TOKEN and GITHUB_REPO (owner/repo) over writing the token here. Use a PRIVATE repo."
+    },
+    "notes": "Simple JSON storage for users and threads. Files are created automatically. With database.github set they are also mirrored to GitHub."
   },
   "optionsFca": {
     "forceLogin": true,
@@ -98,5 +110,15 @@
     "keepAliveInterval": 240000,
     "tokenRefreshInterval": 600000,
     "notes": "Extra options passed to ig-chat-api.login() in direct mode (same values as Insta-Bot3). minRequestInterval (ms) spaces API calls."
+  },
+  "instachat": {
+    "pollIntervalMs": 2500,
+    "idlePollIntervalMs": 8000,
+    "adaptivePolling": true,
+    "throttle": {
+      "minGapMs": 700,
+      "perThreadGapMs": 1200,
+      "jitterMs": 300
+    }
   }
 }

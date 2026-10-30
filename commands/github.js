@@ -1,101 +1,145 @@
-const axios = require("axios");
 
-const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-hub";
-let apiBaseUrl = null;
-let apiConfigRequest = null;
-
-async function getApiBaseUrl() {
-  if (apiBaseUrl) return apiBaseUrl;
-
-  if (!apiConfigRequest) {
-    apiConfigRequest = axios
-      .get(API_CONFIG_URL, { timeout: 15000 })
-      .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
-
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
-        }
-
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
-        return apiBaseUrl;
-      })
-      .finally(() => {
-        apiConfigRequest = null;
-      });
-  }
-
-  return apiConfigRequest;
-}
+const fs = require("fs-extra");
+const path = require("path");
 
 module.exports = {
   config: {
     name: "github",
-    version: "1.0",
-    author: "CRX Shihab",
-    role: 0,
+    aliases: [],
+    version: "2.4.75",
+    author: "ST",
     countDown: 5,
-    shortDescription: { en: "Fetch GitHub user profile and top repositories" },
-    category: "utility",
-    guide: { en: "{pn} <username>" }
+    role: 2,
+    description: "Manage GitHub repository synchronization",
+    category: "owner",
+    guide: {
+      en: "   {pn} status - Check GitHub sync status\n"
+        + "   {pn} test - Test GitHub connection\n"
+        + "   {pn} sync - Sync entire project to GitHub\n"
+        + "   {pn} enable - Enable auto-sync\n"
+        + "   {pn} disable - Disable auto-sync\n"
+        + "   {pn} upload <file> - Upload specific file"
+    }
   },
 
-  onStart: async function ({ api, event, args, message }) {
-    const username = args[0];
-    if (!username) {
-      return message.reply("❌ Please provide a GitHub username.\nExample: /github <username>");
+  ST: async function({ args, message, api }) {
+    const githubSync = global.utils.getGitHubSync();
+    
+    if (!githubSync) {
+      return message.reply("❌ GitHub integration is not configured. Please set up in config.json");
     }
 
-    try {
-      const apiUrl = `${await getApiBaseUrl()}/api/github?user=${encodeURIComponent(username)}`;
-      const response = await axios.get(apiUrl, { timeout: 15000 });
+    const action = (args[0] || "").toLowerCase();
 
-      if (!response.data.status) {
-        throw new Error("API returned error");
+    switch (action) {
+      case "status": {
+        const status = githubSync.enabled ? "✅ Enabled" : "❌ Disabled";
+        const initialized = githubSync.initialized ? "✅ Yes" : "❌ No";
+        const repo = `${githubSync.owner}/${githubSync.repo}`;
+        const branch = githubSync.branch;
+        const autoSync = githubSync.autoCommit ? "✅ On" : "❌ Off";
+        const autoSyncOnUpdate = global.GoatBot.config.githubIntegration?.autoSyncOnUpdate ? "✅ On" : "❌ Off";
+        
+        return message.reply(
+          `📊 GitHub Integration Status\n\n` +
+          `Status: ${status}\n` +
+          `Initialized: ${initialized}\n` +
+          `Repository: ${repo}\n` +
+          `Branch: ${branch}\n` +
+          `Auto-commit: ${autoSync}\n` +
+          `Auto-sync on update: ${autoSyncOnUpdate}\n` +
+          `Queue: ${githubSync.queue.length} pending\n\n` +
+          `💡 Use 'github test' to verify connection`
+        );
       }
 
-      const data = response.data;
-      const profile = data.profile;
-      const repos = data.top_repositories || [];
-
-      let avatarStream = null;
-      try {
-        avatarStream = await global.utils.getStreamFromURL(profile.avatar);
-      } catch (e) {
+      case "test": {
+        const result = await githubSync.testConnection();
+        return message.reply(
+          result.success
+            ? `✅ Connection successful!\nRepository: ${githubSync.owner}/${githubSync.repo}`
+            : `❌ Connection failed: ${result.message}`
+        );
       }
 
-      let msg = `╭──〔 𝔾𝕀𝕋ℍ𝕌𝔹 ℙℝ𝕆𝔽𝕀𝕃𝔼 〕──╮\n`;
-      msg += `│ 👤 ${profile.name || profile.username}\n`;
-      msg += `│ 🆔 @${profile.username}\n`;
-      if (profile.bio) msg += `│ 📝 ${profile.bio}\n`;
-      msg += `│ 👥 Followers: ${profile.followers}\n`;
-      msg += `│ 📁 Repos: ${profile.public_repos}\n`;
-      msg += `│ 🔗 ${profile.link}\n`;
-      msg += `╰─────────────────────╯\n\n`;
-
-      if (repos.length > 0) {
-        msg += `╭──〔 𝕋𝕆ℙ ℝ𝔼ℙ𝕆𝕊𝕀𝕋𝕆ℝ𝕀𝔼𝕊 〕──╮\n`;
-        for (const repo of repos.slice(0, 5)) {
-          msg += `│ 📦 ${repo.repo_name}\n`;
-          msg += `│ ⭐ ${repo.stars}  🍴 ${repo.forks}  💻 ${repo.language || "Unknown"}\n`;
-          msg += `│ 🔗 ${repo.url}\n`;
-          if (repos.indexOf(repo) < repos.length - 1) msg += `│ ──────────────────\n`;
+      case "sync": {
+        message.reply("🔄 Starting full project sync...");
+        const result = await githubSync.syncProject();
+        
+        if (result.success) {
+          const successCount = result.results.filter(r => r.success).length;
+          const failCount = result.results.filter(r => !r.success).length;
+          
+          return message.reply(
+            `✅ Project sync completed!\n` +
+            `Success: ${successCount}\n` +
+            `Failed: ${failCount}`
+          );
+        } else {
+          return message.reply(`❌ Sync failed: ${result.message}`);
         }
-        msg += `╰─────────────────────╯`;
-      } else {
-        msg += `❌ No public repositories found.`;
       }
 
-      const attachments = avatarStream ? [avatarStream] : [];
-      return message.reply({
-        body: msg,
-        attachment: attachments
-      });
+      case "enable": {
+        githubSync.enabled = true;
+        githubSync.autoCommit = true;
+        
+        const configPath = path.join(process.cwd(), "config.json");
+        const config = require(configPath);
+        delete require.cache[require.resolve(configPath)];
+        config.githubIntegration.enable = true;
+        config.githubIntegration.autoCommit = true;
+        config.githubIntegration.autoSyncOnUpdate = true;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        
+        return message.reply("✅ GitHub auto-sync enabled\n📦 Auto-sync on updates: enabled");
+      }
 
-    } catch (error) {
-      console.error(error);
-      return message.reply(`❌ Failed to fetch GitHub profile for "${username}".\nError: ${error.message || "Unknown error"}`);
+      case "disable": {
+        githubSync.enabled = false;
+        githubSync.autoCommit = false;
+        
+        const configPath = path.join(process.cwd(), "config.json");
+        const config = require(configPath);
+        delete require.cache[require.resolve(configPath)];
+        config.githubIntegration.enable = false;
+        config.githubIntegration.autoCommit = false;
+        config.githubIntegration.autoSyncOnUpdate = false;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        
+        return message.reply("❌ GitHub auto-sync disabled\n📦 Auto-sync on updates: disabled");
+      }
+
+      case "upload": {
+        if (!args[1]) {
+          return message.reply("❌ Please specify a file path");
+        }
+
+        const filePath = args.slice(1).join(" ");
+        const fullPath = path.join(process.cwd(), filePath);
+        
+        if (!fs.existsSync(fullPath)) {
+          return message.reply(`❌ File not found: ${filePath}`);
+        }
+
+        const result = await githubSync.syncFile("upload", fullPath);
+        return message.reply(
+          result.success
+            ? `✅ File uploaded: ${filePath}`
+            : `❌ Upload failed: ${result.message}`
+        );
+      }
+
+      default:
+        return message.reply(
+          "📚 GitHub Commands:\n\n" +
+          "• status - Check sync status\n" +
+          "• test - Test connection\n" +
+          "• sync - Sync entire project\n" +
+          "• enable - Enable auto-sync\n" +
+          "• disable - Disable auto-sync\n" +
+          "• upload <file> - Upload file"
+        );
     }
   }
 };

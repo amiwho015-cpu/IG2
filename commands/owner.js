@@ -1,9 +1,13 @@
+const fs = require("fs");
+const path = require("path");
 const moment = require("moment-timezone");
+
+const OWNER_VIDEO = path.join(__dirname, "..", "assets", "owner.mp4");
 
 module.exports = {
   config: {
     name: "owner",
-    aliases: ["admininfo", "info", "ownerinfo"],
+    aliases: ["admininfo", "ownerinfo"],
     version: "3.0",
     author: "Shihab",
     countDown: 5,
@@ -15,9 +19,9 @@ module.exports = {
 
   onStart: async function ({ api, event, message }) {
 
-    const ownerName = "Negative Shihab";
+    const ownerName = "Arfatul Islam Shihab";
     const ownerAge = "18+";
-    const fbName = "Negative Shihab";
+    const fbName = "loading";
     const messenger = "https://www.facebook.com/profile.php?id=100094063186003";
     const whatsapp = "016133853**";
     const telegram = "Ekon use Kori na😢";
@@ -25,6 +29,7 @@ module.exports = {
     const religion = "Islam";
     const relationship = "Single"
     const timeBD = moment().tz("Asia/Dhaka");
+    const study = "Hsc-result e mara kawar opoekka..😓";
     
     const infoMsg = 
 `『 𝗢𝗪𝗡𝗘𝗥 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡 』
@@ -36,6 +41,7 @@ module.exports = {
 ● Relationship: ${relationship}
 ● Religion: ${religion}
 ● Address: ${address}
+● study: ${study}
 
 📞 𝗖𝗢𝗡𝗧𝗔𝗖𝗧 𝗗𝗘𝗧𝗔𝗜𝗟𝗦:
 ● Facebook: ${fbName}
@@ -49,13 +55,12 @@ module.exports = {
 ● ${timeBD.format("hh:mm:ss A")}
 ━━━━━━━━━━━━━━━━━━━━━`;
 
-    try {
-      return message.reply({
-        body: infoMsg,
-        attachment: await global.utils.getStreamFromURL(imageLink)
-      });
-    } catch (e) {
-      return message.reply(infoMsg);
+    await message.reply(infoMsg);
+
+    // Owner video goes last, after the info text.
+    if (fs.existsSync(OWNER_VIDEO)) {
+      try { await message.reply({ attachment: fs.createReadStream(OWNER_VIDEO) }); }
+      catch (_) { /* info text already sent; ignore video failure */ }
     }
   },
 

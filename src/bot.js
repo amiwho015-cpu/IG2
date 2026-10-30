@@ -14,6 +14,7 @@ const goatCompat = require("./goatCompat");
 const { createOnlineStatus } = require("./onlineStatus");
 
 const serverLogin = require("../auth");
+const igAdapter = require("./igAdapter");
 
 /**
  * Cookies the bot itself will hand to the server. `IG_COOKIES` (an env var on
@@ -38,6 +39,12 @@ function loadServerCookies() {
  */
 function resolveLogin(config) {
 	const server = config.server || {};
+	// Default: the vendored instachat-api (lib/instachat-api) — no external server
+	// and no private package, only your cookies (IG_COOKIES / account.txt).
+	if (server.mode === "instachat") {
+		const cookies = () => loadAccount();
+		return { login: () => igAdapter.login({ cookies: cookies(), config, reloadCookies: cookies }), mode: "instachat" };
+	}
 	const wantDirect = server.mode === "direct";
 	if (!wantDirect && server.url && server.token) return { login: serverLogin, mode: "server" };
 	// Direct mode (same as Insta-Bot3): talk to Instagram through the locally
@@ -96,13 +103,31 @@ function normalizeEvent(event) {
 	// on the transport; normalize the participant lists every event script reads.
 	const added = firstArray(normalized.userIDs, normalized.addedParticipants, normalized.added_participants,
 		normalized.added_users, normalized.added_user_ids, normalized.usersAdded, normalized.users_added,
-		normalized.participantsAdded, normalized.participants_added);
+		normalized.participantsAdded, normalized.participants_added,
+		normalized.logMessageData && normalized.logMessageData.addedParticipants);
 	const removed = firstArray(normalized.removedParticipants, normalized.removed_participants,
 		normalized.removed_users, normalized.removed_user_ids, normalized.left_users, normalized.usersRemoved,
-		normalized.users_removed, normalized.participantsRemoved, normalized.participants_removed);
+		normalized.users_removed, normalized.participantsRemoved, normalized.participants_removed,
+		normalized.logMessageData && normalized.logMessageData.leftParticipantFbId && [normalized.logMessageData.leftParticipantFbId]);
 
-	if (normalized.type === "join" && !normalized.userIDs) normalized.userIDs = added || [];
-	if (normalized.type === "leave" && !normalized.userIDs) normalized.userIDs = removed || [];
+	// Some builds name the membership event differently (log:subscribe, participants_added, ...).
+	const alias = membershipAlias(normalized);
+	if (alias) normalized.type = alias;
+
+	if (normalized.type === "join" || normalized.type === "leave") {
+		// Entries may be ids, @usernames or whole member objects: split them into
+		// userIDs / usernames so the join / leave scripts always get plain strings.
+		const list = normalized.type === "join" ? added : removed;
+		const split = splitMembers(list);
+		const ids = [...new Set([...(Array.isArray(normalized.userIDs) ? normalized.userIDs : []).map(String), ...split.ids])]
+			.filter(x => x && x !== "[object Object]");
+		normalized.userIDs = ids;
+		if (split.usernames.length) {
+			const have = Array.isArray(normalized.usernames) ? normalized.usernames.map(String) : [];
+			normalized.usernames = [...new Set([...have, ...split.usernames])];
+		}
+		if (!normalized.participantID && ids.length === 1) normalized.participantID = ids[0];
+	}
 
 	// Infer a group thread when the API omitted isGroup: the realtime payload
 	// often does. A participant list with more than one member, or a legacy
@@ -121,6 +146,38 @@ function normalizeEvent(event) {
 	return normalized;
 }
 
+const JOIN_TYPES = /^(log:subscribe|participants?_?added|member_?added|add_?participants?|thread_?participants?_?added|participant_?joined|user_?joined|members?_?joined|member_?join|users?_?added)$/i;
+const LEAVE_TYPES = /^(log:unsubscribe|participants?_?removed|member_?removed|remove_?participants?|thread_?participants?_?removed|participant_?left|user_?left|members?_?left|member_?leave|users?_?removed)$/i;
+
+/** "join" / "leave" when the event is a membership change under another name, else null. */
+function membershipAlias(event) {
+	for (const key of [event.type, event.logMessageType, event.action, event.actionType, event.subtype, event.eventType]) {
+		if (typeof key !== "string") continue;
+		if (JOIN_TYPES.test(key)) return "join";
+		if (LEAVE_TYPES.test(key)) return "leave";
+	}
+	return null;
+}
+
+/** [ "123", "@bob", { id, username } ] -> { ids: ["123"], usernames: ["bob"] }. */
+function splitMembers(list) {
+	const ids = [], usernames = [];
+	for (const item of Array.isArray(list) ? list : []) {
+		if (item == null) continue;
+		if (typeof item === "object") {
+			const id = item.userID ?? item.userId ?? item.userFbId ?? item.user_id ?? item.id ?? item.pk ?? item.uid ?? item.fbid;
+			const handle = item.username ?? item.userName ?? item.vanity ?? item.handle;
+			if (id != null && /^\d+$/.test(String(id))) ids.push(String(id));
+			else if (handle) usernames.push(String(handle).replace(/^@/, ""));
+			continue;
+		}
+		const text = String(item).trim();
+		if (/^\d+$/.test(text)) ids.push(text);
+		else if (text) usernames.push(text.replace(/^@/, ""));
+	}
+	return { ids, usernames };
+}
+
 // Return the first argument that is a non-empty array, else null.
 function firstArray(...candidates) {
 	for (const value of candidates) {
@@ -128,6 +185,10 @@ function firstArray(...candidates) {
 	}
 	return null;
 }
+
+const KNOWN_TYPES = new Set(["message", "message_reply", "message_reaction", "message_unsend", "read_receipt", "typ", "presence",
+	"join", "leave", "ready"]);
+const unknownSeen = new Set();
 
 function createBot(config) {
 	const startedAt = Date.now();
@@ -178,6 +239,7 @@ function createBot(config) {
 			return Promise.reject(error);
 		}
 
+		log.info("BOOT", `login mode: ${mode} (build instachat-1)`);
 		return new Promise((resolve, reject) => {
 			const finish = async (error, api) => {
 				if (error) return reject(error);
@@ -203,6 +265,12 @@ function createBot(config) {
 				onlineStatus.start();
 				resolve(api);
 			};
+
+			if (mode === "instachat") {
+				log.info("LOGIN", "Connecting with the built-in instachat-api (cookies)");
+				Promise.resolve(login()).then(api => finish(null, api), finish);
+				return;
+			}
 
 			if (mode === "server") {
 				const options = {
@@ -261,6 +329,11 @@ function createBot(config) {
 
 		state.messagesHandled++;
 
+		if (!KNOWN_TYPES.has(String(event.type)) && !unknownSeen.has(String(event.type))) {
+			unknownSeen.add(String(event.type));
+			log.info("EVENT?", `unhandled event type "${event.type}": ${JSON.stringify(event).slice(0, 400)}`);
+		}
+
 		if (shouldLog(event.type)) {
 			const shown = Object.assign({}, event);
 			if (Array.isArray(shown.participantIDs)) shown.participantIDs = `Array(${shown.participantIDs.length})`;
@@ -281,8 +354,11 @@ function createBot(config) {
 		if (/connection closed|closed by user/i.test(message)) return;
 		onlineStatus.writeLine({ event: "listener_error", error: message });
 		if (/not logged in|login_required|logged.?out/i.test(message)) {
-			log.error("LISTEN", "Session is no longer valid. Re-reading account.txt…", message);
-			scheduleRelogin();
+			log.error("LISTEN", "Session is no longer valid. Re-reading cookies…", message);
+			Promise.resolve(state.api && state.api.reloadSession ? state.api.reloadSession() : false)
+				.then(ok => { if (!ok && state.api && state.api.reloadSession) log.warn("LISTEN", "cookies are still invalid; paste fresh cookies (retrying)"); })
+				.catch(e => log.warn("LISTEN", `reload failed: ${e.message}`))
+				.then(() => scheduleRelogin());
 		}
 		else {
 			log.error("LISTEN", "Listener error", message);
@@ -339,6 +415,10 @@ function createBot(config) {
 		log.master("BOOT", `${config.botName} starting…`);
 		// Load commands/events once, before connecting. Re-running this on every
 		// retry would duplicate entries and drop the count to zero.
+		// Pull saved users/threads (and command data files) from GitHub first,
+		// so commands that read their files at load time see the saved data.
+		try { await database.init(); }
+		catch (error) { log.warn("GITHUB", `storage init failed, continuing with local data: ${error.message}`); }
 		loadCommands();
 		// Retry the initial connection instead of exiting: the server may not have
 		// cookies yet (or may be cold-starting on a free tier). A fatal exit here
@@ -379,7 +459,8 @@ function createBot(config) {
 		// could recreate the listener after stop().
 		if (state.restartTimer) { clearInterval(state.restartTimer); state.restartTimer = null; }
 		if (state.retireListener) { clearTimeout(state.retireListener); state.retireListener = null; }
-		database.flush();
+		try { await database.flushRemote(); }
+		catch (error) { log.warn("GITHUB", `final save failed: ${error.message}`); }
 		// Deliberately DO NOT call api.logout() on shutdown.
 		//
 		// In server mode this RPCs Instagram's /accounts/logout/, which invalidates

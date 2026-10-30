@@ -106,6 +106,9 @@ module.exports = {
 			if (seen.has(mention)) continue;
 			seen.add(mention);
 
+			// Forget the greeting so the member is welcomed again if they are re-added.
+			try { require("../src/welcomeState").forget(threadID, target.userID, username); } catch (_) { /* optional */ }
+
 			try {
 				await message.send(fill(template, [mention, threadName || threadID]));
 			}

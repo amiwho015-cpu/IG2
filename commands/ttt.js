@@ -1,4 +1,6 @@
 const fs = require("fs");
+const os = require("os");
+const pathModule = require("path");
 const { loadImage, createCanvas } = require("canvas");
 
 var AIMove;
@@ -31,6 +33,7 @@ module.exports = {
       if (!data.gameOn) return message.reply("❌ | No game in progress.");
       const attachment = await displayBoard(data);
       return message.reply({ body: "🎮 | Continued!\nReply with cell (1-9).", attachment }, (err, info) => {
+        if (err || !info) return;
         global.GoatBot.onReply.set(info.messageID, {
           commandName: this.config.name,
           messageID: info.messageID,
@@ -51,6 +54,7 @@ module.exports = {
 
       const attachment = await displayBoard(newData);
       return message.reply({ body: `🎮 | Started! You have a chance to win now.\nReply with (1-9).`, attachment }, (err, info) => {
+        if (err || !info) return;
         global.GoatBot.onReply.set(info.messageID, {
           commandName: this.config.name,
           messageID: info.messageID,
@@ -62,7 +66,7 @@ module.exports = {
 
   onReply: async function ({ event, Reply, message }) {
     let { body, threadID, senderID } = event;
-    let data = global.moduleData.tictactoe.get(threadID);
+    let data = global.moduleData && global.moduleData.tictactoe && global.moduleData.tictactoe.get(threadID);
 
     if (!data || data.gameOn == false || senderID !== Reply.author) return;
 
@@ -87,7 +91,10 @@ module.exports = {
     } else statusMsg = "🎮 | Your turn (1-9):";
 
     const attachment = await displayBoard(data);
+    // This board replaces the one the player answered; the old board must stop reacting.
+    global.GoatBot.onReply.delete(Reply.messageID);
     message.reply({ body: statusMsg, attachment }, (err, info) => {
+      if (err || !info) return;
       if (!isGameOver) {
         global.GoatBot.onReply.set(info.messageID, {
           commandName: this.config.name,
@@ -127,9 +134,13 @@ async function displayBoard(data) {
       }
     }
   }
-  const path = __dirname + `/cache/ttt_${Date.now()}.png`;
-  if (!fs.existsSync(__dirname + "/cache")) fs.mkdirSync(__dirname + "/cache");
+  // Boards go to the OS temp dir (commands/ may be read-only) and are removed again after a few minutes.
+  const dir = pathModule.join(os.tmpdir(), "instabot-ttt");
+  fs.mkdirSync(dir, { recursive: true });
+  const path = pathModule.join(dir, `ttt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`);
   fs.writeFileSync(path, canvas.toBuffer("image/png"));
+  const cleanup = setTimeout(() => fs.unlink(path, () => { }), 5 * 60 * 1000);
+  if (cleanup.unref) cleanup.unref();
   return fs.createReadStream(path);
 }
 

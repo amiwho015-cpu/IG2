@@ -1,79 +1,104 @@
-const axios = require("axios");
+const axios = require('axios');
+const fs = require('fs-extra'); 
+const path = require('path');
+const stream = require('stream');
+const { promisify } = require('util');
 
-const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-hub";
-let apiBaseUrl = null;
-let apiConfigRequest = null;
+const pipeline = promisify(stream.pipeline);
+const API_ENDPOINT = "https://free-goat-api.onrender.com/rbg"; 
+const CACHE_DIR = path.join(__dirname, 'cache');
 
-async function getApiBaseUrl() {
-  if (apiBaseUrl) return apiBaseUrl;
+function extractImageUrl(args, event) {
+    let imageUrl = args.find(arg => arg.startsWith('http'));
 
-  if (!apiConfigRequest) {
-    apiConfigRequest = axios
-      .get(API_CONFIG_URL, { timeout: 15000 })
-      .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
-
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
+    if (!imageUrl && event.messageReply && event.messageReply.attachments && event.messageReply.attachments.length > 0) {
+        const imageAttachment = event.messageReply.attachments.find(att => att.type === 'photo' || att.type === 'image');
+        if (imageAttachment && imageAttachment.url) {
+            imageUrl = imageAttachment.url;
         }
-
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
-        return apiBaseUrl;
-      })
-      .finally(() => {
-        apiConfigRequest = null;
-      });
-  }
-
-  return apiConfigRequest;
+    }
+    return imageUrl;
 }
 
 module.exports = {
   config: {
     name: "rbg",
-    aliases: ["removebg"],
-    version: "3.1",
-    author: "CRX Shihab",
-    countDown: 4,
+    aliases: ["removebg", "nobg", "bgremove"],
+    version: "2.0",
+    author: "NeoKEX",
+    countDown: 10,
     role: 0,
-    shortDescription: "Remove image background",
-    category: "tools",
-    guide: "{pn} [reply to image]"
+    longDescription: "Removes the background from an image using AI.",
+    category: "image",
+    guide: {
+      en: 
+        "{pn} <image_url> OR reply to an image.\n\n" +
+        "• Example: {pn} https://example.com/image.jpg"
+    }
   },
 
-  onStart: async function ({ api, event }) {
-    const { threadID, messageID, type, messageReply } = event;
-    const API_URL = `${await getApiBaseUrl()}/api/rbg`;
-    const xalman_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+  onStart: async function ({ args, message, event }) {
+    
+    const imageUrl = extractImageUrl(args, event);
 
-    let imageUrl;
-    if (type === "message_reply" && messageReply.attachments[0]?.type === "photo") {
-      imageUrl = messageReply.attachments[0].url;
-    } else {
-      return api.sendMessage("╭─❍\n│ 𝖯𝗅𝖾𝖺𝗌𝖾 𝗋𝖾𝗉𝗅𝗒 𝗍𝗈 𝖺𝗇 𝗂𝗆𝖺𝗀𝖾!\n╰───────────⟡", threadID, messageID);
+    if (!imageUrl) {
+      return message.reply("❌ Please provide an image URL or reply to an image to remove its background.");
     }
 
-    api.setMessageReaction("⏳", messageID, () => {}, true);
+    if (!fs.existsSync(CACHE_DIR)) {
+        fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+
+    message.reaction("⏳", event.messageID);
+    let tempFilePath; 
 
     try {
-      const response = await axios({
-        method: 'get',
-        url: `${API_URL}?url=${encodeURIComponent(imageUrl)}`,
-        headers: { "User-Agent": xalman_UA },
-        responseType: 'stream'
+      const fullApiUrl = `${API_ENDPOINT}?url=${encodeURIComponent(imageUrl)}`;
+      
+      const imageDownloadResponse = await axios.get(fullApiUrl, {
+          responseType: 'stream',
+          timeout: 60000,
       });
 
-      api.setMessageReaction("✅", messageID, () => {}, true);
-      return api.sendMessage({
-        body: "❖ 𝗕𝗔𝗖𝗞𝗚𝗥𝗢𝗨𝗡𝗗 𝗥𝗘𝗠𝗢𝗩𝗘𝗥 ❖\n━━━━━━━━━━━━━━━━━━",
-        attachment: response.data
-      }, threadID, messageID);
+      if (imageDownloadResponse.status !== 200) {
+           throw new Error(`API request failed with status code ${imageDownloadResponse.status}.`);
+      }
+      
+      const fileHash = Date.now() + Math.random().toString(36).substring(2, 8);
+      tempFilePath = path.join(CACHE_DIR, `rbg_${fileHash}.png`);
+      
+      await pipeline(imageDownloadResponse.data, fs.createWriteStream(tempFilePath));
+
+      message.reaction("✅", event.messageID);
+      
+      await message.reply({
+        body: `Background removed successfully!`,
+        attachment: fs.createReadStream(tempFilePath)
+      });
 
     } catch (error) {
-      console.error(error);
-      api.setMessageReaction("❌", messageID, () => {}, true);
-      return api.sendMessage("✕ Failed to remove background!", threadID, messageID);
+      message.reaction("❌", event.messageID);
+      
+      let errorMessage = "❌ Failed to remove background. An error occurred.";
+      if (error.response) {
+         if (error.response.status === 400) {
+             errorMessage = `❌ Error 400: The provided URL might be invalid or the image is too small/large.`;
+         } else {
+             errorMessage = `❌ HTTP Error ${error.response.status}. The API may be unavailable.`;
+         }
+      } else if (error.message.includes('timeout')) {
+         errorMessage = `❌ Request timed out (API response too slow).`;
+      } else if (error.message) {
+         errorMessage = `❌ ${error.message}`;
+      }
+
+      console.error("RBG Command Error:", error);
+      message.reply(errorMessage);
+
+    } finally {
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+          fs.unlinkSync(tempFilePath);
+      }
     }
   }
 };

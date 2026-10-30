@@ -6,7 +6,7 @@ module.exports = {
 		version: "1.8",
 		author: "CRX Shihab",
 		countDown: 5,
-		role: 0,
+		role: 1,
 		description: {
 			vi: "cảnh cáo thành viên trong nhóm, đủ 3 lần ban khỏi box",
 			en: "warn member in group, if they have 3 warns, they will be banned"

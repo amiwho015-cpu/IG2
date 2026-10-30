@@ -40,6 +40,12 @@ async function download(axios, url) {
 async function safeLoadImage(Canvas, axios, url) {
 	try {
 		if (!url) throw new Error("no image url");
+		// Avatars: take the sharpest version Instagram serves (drops the sNNNxNNN size cap).
+		try {
+			const hd = await require("./hdpic").bestPicture([url]);
+			if (hd && hd.buffer) return await Canvas.loadImage(hd.buffer);
+		}
+		catch (_) { /* fall back to the plain download */ }
 		return await Canvas.loadImage(await download(axios, url));
 	}
 	catch (error) {

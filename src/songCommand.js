@@ -16,8 +16,7 @@ module.exports = function makeSong({ name, aliases, order }) {
 		let file;
 		try {
 			file = await downloadAudio(video.url, order);
-			const caption = `🎧 Song: ${video.title}\n🎤 Publisher: ${video.channel || "Unknown"}\n\n😘 Enjoy Using CRX Shihab Robot..`;
-			await message.reply({ body: caption, attachment: fs.createReadStream(file) });
+			await message.reply({ attachment: fs.createReadStream(file) });
 		}
 		catch (e) {
 			await unsend(api, message, wait && wait.messageID);

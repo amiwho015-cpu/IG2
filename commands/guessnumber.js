@@ -112,10 +112,12 @@ module.exports = {
 			if (!rankGuessNumber.length)
 				return message.reply(getLang("noScore"));
 
-			const page = parseInt(args[1]) || 1;
+			const page = Math.max(1, parseInt(args[1]) || 1);
 			const maxUserOnePage = 30;
 
-			let rankGuessNumberHandle = await Promise.all(rankGuessNumber.slice((page - 1) * maxUserOnePage, page * maxUserOnePage).map(async item => {
+			// Sort the WHOLE ranking by wins first, then cut the page (it used to cut first, so later pages were never ranked).
+			const sortedRank = rankGuessNumber.slice().sort((a, b) => (b.wins?.length || 0) - (a.wins?.length || 0));
+			let rankGuessNumberHandle = await Promise.all(sortedRank.slice((page - 1) * maxUserOnePage, page * maxUserOnePage).map(async item => {
 				const userName = await usersData.getName(item.id);
 				return {
 					...item,
@@ -125,10 +127,9 @@ module.exports = {
 				};
 			}));
 
-			rankGuessNumberHandle = rankGuessNumberHandle.sort((a, b) => b.winNumber - a.winNumber);
 			const medals = ["🥇", "🥈", "🥉"];
 			const rankGuessNumberText = rankGuessNumberHandle.map((item, index) => {
-				const medal = medals[index] || index + 1;
+				const medal = page === 1 ? (medals[index] || index + 1) : (page - 1) * maxUserOnePage + index + 1;
 				return `${medal} ${item.userName} - ${item.winNumber} wins - ${item.lossNumber} losses`;
 			}).join("\n");
 
@@ -155,11 +156,11 @@ module.exports = {
 			const winNumber = userDataGuessNumber.wins?.length || 0;
 			const playNumber = winNumber + (userDataGuessNumber.losses?.length || 0);
 			const lossNumber = userDataGuessNumber.losses?.length || 0;
-			const winRate = (winNumber / playNumber * 100).toFixed(2);
+			const winRate = playNumber ? (winNumber / playNumber * 100).toFixed(2) : "0.00";
 			const winInfo = {};
 			for (const item of userDataGuessNumber.wins || [])
 				winInfo[item.col] = winInfo[item.col] ? winInfo[item.col] + 1 : 1;
-			const playTime = convertTime(userDataGuessNumber.wins.reduce((a, b) => a + b.timeSuccess, 0) + userDataGuessNumber.losses.reduce((a, b) => a + b.timeSuccess, 0));
+			const playTime = convertTime((userDataGuessNumber.wins || []).reduce((a, b) => a + (b.timeSuccess || 0), 0) + (userDataGuessNumber.losses || []).reduce((a, b) => a + (b.timeSuccess || 0), 0));
 			return message.reply(getLang("userRankInfo", userName, pointsReceived, playNumber, winNumber, Object.keys(winInfo).map(item => `  + ${getLang("digits", item, winInfo[item])}`).join("\n"), lossNumber, winRate, playTime));
 		}
 		else if (args[0] == "reset") {
@@ -193,18 +194,16 @@ module.exports = {
 		const gameData = guessNumberGame(options);
 		gameData.mode = mode;
 
-		const messageData = message.reply(`${getLang("created")}\n\n${getLang("gameGuide", row)}\n\n${getLang("gameNote")}\n\n${getLang("replyToPlayGame", col)}`);
+		// Send the instructions first and wait for them, so the board image always arrives after the text.
+		const introText = `${getLang("created")}\n\n${getLang("gameGuide", row)}\n\n${getLang("gameNote")}\n\n${getLang("replyToPlayGame", col)}`;
+		const messageData = await message.reply(introText);
 		gameData.messageData = messageData;
 
 		message.reply({
 			attachment: gameData.imageStream
 		}, (err, info) => {
-			global.GoatBot.onReply.set(info.messageID, {
-				commandName,
-				messageID: info.messageID,
-				author: event.senderID,
-				gameData
-			});
+			if (err || !info) return;
+			armGame({ commandName, boardID: info.messageID, textID: messageData && messageData.messageID, replyBody: introText, threadID: event.threadID, author: event.senderID, gameData });
 		});
 	},
 
@@ -216,22 +215,24 @@ module.exports = {
 		const numbers = (event.body || "").split("").map(item => item.trim()).filter(item => item != "" && !isNaN(item));
 		if (numbers.length != oldGameData.col)
 			return message.reply(getLang("invalidNumbers", oldGameData.col));
-		global.GoatBot.onReply.delete(Reply.messageID);
+
+		// The handler stays armed until the next board is out, so two quick guesses on the same board
+		// must not both be applied to it.
+		if (oldGameData.busy) return;
+		oldGameData.busy = true;
 
 		oldGameData.numbers = numbers;
 		const gameData = guessNumberGame(oldGameData);
+		gameData.busy = false;
 
 		if (gameData.isWin == null) {
 			message.reply({
 				attachment: gameData.imageStream
 			}, (err, info) => {
-				message.unsend(Reply.messageID);
-				global.GoatBot.onReply.set(info.messageID, {
-					commandName,
-					messageID: info.messageID,
-					author: event.senderID,
-					gameData
-				});
+				if (err || !info) { oldGameData.busy = false; return; } // board could not be sent: keep the old board armed so the player can retry
+				disarmGame(Reply);
+				message.unsend(Reply.boardID || Reply.messageID);
+				armGame({ commandName, boardID: info.messageID, textID: Reply.textID, replyBody: Reply.replyBody, threadID: Reply.threadID || event.threadID, author: event.senderID, gameData });
 			});
 		}
 		else {
@@ -240,8 +241,9 @@ module.exports = {
 			const messageText = gameData.isWin ?
 				getLang("win", gameData.answer, gameData.tryNumber - 1, rewardPoint) :
 				getLang("loss", gameData.answer);
-			message.unsend((await oldGameData.messageData).messageID);
-			message.unsend(Reply.messageID);
+			disarmGame(Reply);
+			try { message.unsend((await oldGameData.messageData).messageID); } catch (_) { /* instructions message already gone */ }
+			message.unsend(Reply.boardID || Reply.messageID);
 			message.reply({
 				body: messageText,
 				attachment: gameData.imageStream
@@ -287,6 +289,20 @@ module.exports = {
 	}
 };
 
+
+// The instructions text and the board image are two separate messages on Instagram, and players
+// reply to either one. Arm the reply handler on BOTH so a reply to the text works too.
+function armGame({ commandName, boardID, textID, replyBody, threadID, author, gameData }) {
+	const data = { commandName, messageID: boardID, boardID, textID, replyBody, threadID, author, gameData };
+	global.GoatBot.onReply.set(boardID, data);
+	if (textID && String(textID) !== String(boardID))
+		global.GoatBot.onReply.set(textID, data);
+}
+
+function disarmGame(Reply) {
+	for (const id of [Reply.boardID, Reply.textID, Reply.messageID])
+		if (id) global.GoatBot.onReply.delete(id);
+}
 
 function wrapTextGetHeight(ctx, text, maxWidth, lineHeight, margin = 0) {
 	const lines = text.split('\n');

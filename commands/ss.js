@@ -1,76 +1,97 @@
-const axios = require("axios");
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const stream = require('stream');
+const { promisify } = require('util');
 
-const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-hub";
-let apiBaseUrl = null;
-let apiConfigRequest = null;
-
-async function getApiBaseUrl() {
-  if (apiBaseUrl) return apiBaseUrl;
-
-  if (!apiConfigRequest) {
-    apiConfigRequest = axios
-      .get(API_CONFIG_URL, { timeout: 15000 })
-      .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
-
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
-        }
-
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
-        return apiBaseUrl;
-      })
-      .finally(() => {
-        apiConfigRequest = null;
-      });
-  }
-
-  return apiConfigRequest;
-}
+const pipeline = promisify(stream.pipeline);
+const API_ENDPOINT = "https://dev.oculux.xyz/api/screenshot";
+const CACHE_DIR = path.join(__dirname, 'cache');
 
 module.exports = {
   config: {
-    name: "ss",
-    version: "3.0",
-    author: "CRX Shihab",
-    countDown: 5,
-    role: 0,
-    description: "Capture website screenshot (PC or mobile mode)",
+    name: "screenshot",
+    aliases: ["ss", "webss"],
+    version: "1.0",
+    author: "NeoKEX",
+    countDown: 10,
+    role: 2,
+    longDescription: "Captures a full-page screenshot of a given website URL.",
     category: "tools",
-    guide: "{pn} <url> [-mobile | -pc]"
+    guide: {
+      en: "{pn} <URL> (e.g., {pn} https://google.com)"
+    }
   },
 
-  onStart: async function ({ api, event, args }) {
-    const { threadID, messageID } = event;
+  onStart: async function ({ args, message, event }) {
+    const userUrl = args[0];
 
-    if (args.length === 0) {
-      return api.sendMessage("❌ Please provide a website URL.\nExample: /ss google.com -mobile", threadID, messageID);
+    if (!userUrl) {
+      return message.reply("❌ Please provide a URL to capture. Example: `!screenshot https://google.com`");
     }
 
-    let url = args[0];
-    let mode = "pc";
-
-    if (args.length > 1) {
-      const flag = args[1].toLowerCase();
-      if (flag === "-mobile" || flag === "mobile") {
-        mode = "mobile";
-      } else if (flag === "-pc" || flag === "pc") {
-        mode = "pc";
-      }
+    // Basic URL validation
+    if (!userUrl.startsWith('http://') && !userUrl.startsWith('https://')) {
+        return message.reply("❌ Invalid URL. Please include `http://` or `https://`.");
     }
 
-    const apiUrl = `${await getApiBaseUrl()}/api/screenshot?url=${encodeURIComponent(url)}&mode=${mode}`;
+    if (!fs.existsSync(CACHE_DIR)) {
+        fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+
+    message.reaction("⏳", event.messageID);
+    
+    let tempFilePath;
 
     try {
-      const stream = await global.utils.getStreamFromURL(apiUrl);
-      return api.sendMessage({
-        body: `📸 Screenshot`,
-        attachment: stream
-      }, threadID, messageID);
+      // Construct the full API URL
+      const fullApiUrl = `${API_ENDPOINT}?url=${encodeURIComponent(userUrl)}`;
+      
+      // Request the screenshot image stream
+      const imageDownloadResponse = await axios.get(fullApiUrl, {
+          responseType: 'stream',
+          timeout: 60000 
+      });
+
+      if (imageDownloadResponse.status !== 200) {
+           throw new Error(`API request failed with status code ${imageDownloadResponse.status}.`);
+      }
+
+      // Create a unique temporary file path
+      const fileHash = Date.now() + Math.random().toString(36).substring(2, 8);
+      tempFilePath = path.join(CACHE_DIR, `screenshot_${fileHash}.png`);
+      
+      // Pipe the image stream to the file
+      await pipeline(imageDownloadResponse.data, fs.createWriteStream(tempFilePath));
+
+      message.reaction("✅", event.messageID);
+      
+      // Reply with the screenshot
+      await message.reply({
+        body: `✨ Here is the screenshot for ${userUrl}`,
+        attachment: fs.createReadStream(tempFilePath)
+      });
+
     } catch (error) {
-      console.error(error);
-      return api.sendMessage(`❌ Failed to capture screenshot. Please check the URL and try again.`, threadID, messageID);
+      message.reaction("❌", event.messageID);
+      
+      let errorMessage = "An error occurred during screenshot generation.";
+      if (error.response) {
+         errorMessage = `HTTP Error: ${error.response.status}. The URL may be invalid or unreachable.`;
+      } else if (error.code === 'ETIMEDOUT') {
+         errorMessage = `Request timed out (60 seconds).`;
+      } else if (error.message) {
+         errorMessage = `${error.message}`;
+      }
+
+      console.error("Screenshot Command Error:", error);
+      message.reply(`❌ ${errorMessage}`);
+      
+    } finally {
+      // Clean up the temporary file
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+          fs.unlinkSync(tempFilePath);
+      }
     }
   }
 };

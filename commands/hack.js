@@ -1,104 +1,115 @@
-const { loadImage, createCanvas } = require("canvas");
-const fs = require("fs-extra");
-const axios = require("axios");
+"use strict";
+
+/**
+ * hack - a prank. Fake "hacking" steps, then a look-alike of Instagram's "Save your login info?"
+ * screen with the target's @username and photo as the joke proof.
+ *   The clock shows the real current time (Bangladesh), the battery level and the charging bolt are
+ *   different every time.
+ *
+ *   {pn}                      -> on yourself
+ *   {pn} @user / reply / uid  -> on that person
+ *   --bat 45                  -> choose the battery level
+ *   --time 06:50              -> choose the clock
+ *
+ * It is a joke image: no real login happens. Use it on friends who are in on the joke.
+ * Author: Shihab
+ */
+
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const Canvas = require("canvas");
+const { hdProfilePicture } = require("../src/hdpic");
+const card = require("../src/igLoginCard");
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function nowTime(timeZone = "Asia/Dhaka") {
+	return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+}
 
 module.exports = {
-  config: {
-    name: "hack",
-    version: "2.5",
-    author: "CRX Shihab",
-    countDown: 5,
-    role: 0,
-    shortDescription: { en: "Generates a hacking image with profile picture" },
-    longDescription: { en: "Creates a hacking-themed image with user's avatar" },
-    category: "FUN & SOCIAL",
-    guide: { en: "{pn} @mention/reply/uid - Generate hacking image" }
-  },
+	config: {
+		name: "hack",
+		version: "3.0",
+		author: "Shihab",
+		countDown: 8,
+		role: 0,
+		category: "FUN & SOCIAL",
+		shortDescription: "Prank: fake hack with an Instagram login screen",
+		longDescription: "Fake hacking steps, then an Instagram \"Save your login info?\" screen with the target's username and photo. Clock = real time, battery changes every time.",
+		guide: { en: "{pn} @mention / reply / uid — prank on that person\n{pn} --bat 45 --time 06:50 — pick the battery or clock\n(a joke image, no real login happens)" }
+	},
 
-  onStart: async function ({ api, event, args, message }) {
-    const { threadID, messageID, senderID, mentions, type, messageReply } = event;
+	onStart: async function ({ api, event, args, message, usersData }) {
+		let battery = null, timeText = null;
+		const words = [];
+		for (let i = 0; i < args.length; i++) {
+			const low = String(args[i]).toLowerCase();
+			if (low === "--bat" || low === "--battery") {
+				const n = parseInt(args[++i], 10);
+				if (Number.isFinite(n)) battery = Math.max(1, Math.min(100, n));
+			}
+			else if (low === "--time") {
+				const m = String(args[++i] || "").match(/^(\d{1,2}):(\d{2})$/);
+				if (m && +m[1] < 24 && +m[2] < 60) timeText = `${m[1].padStart(2, "0")}:${m[2]}`;
+			}
+			else words.push(args[i]);
+		}
 
-    let targetID;
-    if (type === "message_reply") {
-      targetID = messageReply.senderID;
-    } else if (Object.keys(mentions).length > 0) {
-      targetID = Object.keys(mentions)[0];
-    } else if (args.length > 0 && !isNaN(args[0])) {
-      targetID = args[0];
-    } else {
-      targetID = senderID;
-    }
+		const reply = event.messageReply;
+		const mentionIDs = Object.keys(event.mentions || {});
+		let targetID = (reply && reply.senderID) || mentionIDs[0] || null;
+		if (!targetID && words.length && /^\d{5,}$/.test(words[0])) targetID = words[0];
+		targetID = String(targetID || event.senderID);
 
-    try {
-      const userInfo = await api.getUserInfo(targetID);
-      const name = userInfo[targetID]?.name || "Unknown";
+		const react = emoji => Promise.resolve(api.setMessageReaction(emoji, event.messageID)).catch(() => { });
+		await react("⏳");
 
-      api.setMessageReaction("⏳", messageID, () => {}, true);
+		let name = null, username = null, avatarUrl = null;
+		try { name = await usersData.get(targetID, "name"); } catch (_) { /* optional */ }
+		try { username = await usersData.get(targetID, "username"); } catch (_) { /* optional */ }
+		try { avatarUrl = await usersData.getAvatarUrl(targetID); } catch (_) { /* optional */ }
 
-      const avatarUrl = `https://graph.facebook.com/${targetID}/picture?width=512&height=512&access_token=6628568379%7Cc1e620fa708a1d5696fb991c1bde5662`;
-      const templateUrl = "https://i.ibb.co/LXNX3QRW/2b38355a3b01.jpg";
+		let avatar = null;
+		try {
+			const hd = await hdProfilePicture(targetID, [avatarUrl]);
+			if (hd && hd.buffer) avatar = await Canvas.loadImage(hd.buffer);
+		}
+		catch (_) { /* try the plain link */ }
+		if (!avatar && avatarUrl) { try { avatar = await Canvas.loadImage(avatarUrl); } catch (_) { /* silhouette */ } }
 
-      const [avatarBuf, templateBuf] = await Promise.all([
-        axios.get(avatarUrl, { responseType: "arraybuffer" }),
-        axios.get(templateUrl, { responseType: "arraybuffer" })
-      ]);
+		const shown = (username && String(username).replace(/^@/, "")) ||
+			(typeof name === "string" && !/^User \d+$/.test(name) ? name.toLowerCase().replace(/\s+/g, "_") : "instagram_user");
 
-      const avatarImg = await loadImage(avatarBuf.data);
-      const templateImg = await loadImage(templateBuf.data);
+		// the joke "hacking" steps (they edit one message when the host can edit, otherwise they are skipped)
+		let status = null;
+		try { status = await message.reply("💻 Initializing hack..."); } catch (_) { /* optional */ }
+		if (status && status.messageID && typeof api.editMessage === "function") {
+			for (const step of ["> ACCESSING DATABASE...", "> DECRYPTING FILES...", "> BYPASSING FIREWALL...", "> LOGIN SESSION FOUND"]) {
+				await sleep(1500);
+				try { await api.editMessage(`💻 Hacking in progress...\n\n${step}`, status.messageID); } catch (_) { break; }
+			}
+			await sleep(800);
+		}
 
-      const canvas = createCanvas(templateImg.width, templateImg.height);
-      const ctx = canvas.getContext("2d");
+		const buffer = card.render(Canvas, {
+			username: shown,
+			avatar,
+			timeText: timeText || nowTime(),
+			battery: battery != null ? battery : 8 + Math.floor(Math.random() * 93),
+			charging: Math.random() < 0.5,
+			tabs: 2 + Math.floor(Math.random() * 98),
+			speed: (0.5 + Math.random() * 29).toFixed(1)
+		});
 
-      ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height);
-
-      const x = 150;
-      const y = 280;
-      const size = 180;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2, true);
-      ctx.closePath();
-      ctx.clip();
-      ctx.drawImage(avatarImg, x, y, size, size);
-      ctx.restore();
-
-      const cacheDir = path.join(__dirname, "cache");
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-      const filePath = path.join(cacheDir, `hack_${Date.now()}.png`);
-      fs.writeFileSync(filePath, canvas.toBuffer());
-
-      const statusMsg = await api.sendMessage("💻 Initializing hack...", threadID);
-
-      const hackSteps = [
-        "> ACCESSING DATABASE...",
-        "> DECRYPTING FILES...",
-        "> BYPASSING FIREWALL...",
-        "> SYSTEM BREACHED"
-      ];
-
-      for (const step of hackSteps) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        await api.editMessage(`💻 Hacking in progress...\n\n${step}`, statusMsg.messageID);
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await api.editMessage("✅ Hack complete! Sending proof...", statusMsg.messageID);
-
-      api.setMessageReaction("✅", messageID, () => {}, true);
-
-      return api.sendMessage({
-        body: `💻 ${name} has been hacked!`,
-        attachment: fs.createReadStream(filePath)
-      }, threadID, () => {
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      }, messageID);
-
-    } catch (err) {
-      console.error("Hack command error:", err);
-      api.setMessageReaction("❌", messageID, () => {}, true);
-      return message.reply("❌ Failed to generate hacking image.");
-    }
-  }
+		const file = path.join(os.tmpdir(), `hack_${targetID}_${Date.now()}.jpg`);
+		fs.writeFileSync(file, buffer);
+		try {
+			if (status && status.messageID) { try { await api.unsendMessage(status.messageID); } catch (_) { /* already gone */ } }
+			await message.reply({ attachment: fs.createReadStream(file) });
+			await react("✅");
+		}
+		finally { setTimeout(() => fs.unlink(file, () => { }), 20000).unref(); }
+	}
 };

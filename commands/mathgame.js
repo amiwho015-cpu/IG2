@@ -75,7 +75,8 @@ module.exports = {
       const res = await axios.get(`${baseUrl}/api/game?level=${level}`);
 
       const { question, answer, options } = res.data;
-      const correctIndex = options.indexOf(answer) + 1;
+      // answer and options can differ in type (2 vs "2"), so compare as text
+      const correctIndex = options.findIndex(o => String(o).trim() === String(answer).trim()) + 1;
 
       const optText = options.map((o, i) => ` ${i + 1}. ${o}`).join("\n");
 
@@ -121,9 +122,12 @@ ${optText}
 
     if (event.senderID !== author) return;
 
-    clearTimeout(timeout);
+    // Only a 1-4 answer counts. Anything else is ignored and the quiz stays open
+    // (it used to unsend the question first, which ended the game on a typo).
+    const userReply = String(event.body || "").trim();
+    if (!["1", "2", "3", "4"].includes(userReply)) return;
 
-    const userReply = event.body.trim();
+    clearTimeout(timeout);
     const userData = await usersData.get(author) || {};
 
     try {
@@ -149,7 +153,7 @@ ${optText}
 ⭐ +100 XP`
       );
 
-    } else if (["1","2","3","4"].includes(userReply)) {
+    } else {
 
       await usersData.set(author, {
         ...userData,

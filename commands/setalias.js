@@ -4,7 +4,7 @@ module.exports = {
 		version: "1.8",
 		author: "CRX Shihab",
 		countDown: 5,
-		role: 0,
+		role: 1,
 		description: {
 			vi: "Thêm tên gọi khác cho 1 lệnh bất kỳ trong nhóm của bạn",
 			en: "Add an alias for any command in your group"

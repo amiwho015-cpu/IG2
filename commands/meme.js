@@ -1,79 +1,48 @@
 const axios = require("axios");
+const tz = require("../src/toshiro");
 
-const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-hub";
-let apiBaseUrl = null;
-let apiConfigRequest = null;
+const QUERIES = ["funny meme", "bangla funny meme", "bengali meme", "dank memes", "relatable memes", "funny memes bangla"];
 
-async function getApiBaseUrl() {
-  if (apiBaseUrl) return apiBaseUrl;
+// old source, kept only as a backup when Pinterest gives nothing
+const mahmud = async () => {
+  const base = await axios.get("https://raw.githubusercontent.com/mahmudx7/exe/main/baseApiUrl.json", { timeout: 15000 });
+  return base.data.mahmud;
+};
 
-  if (!apiConfigRequest) {
-    apiConfigRequest = axios
-      .get(API_CONFIG_URL, { timeout: 15000 })
-      .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
-
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
-        }
-
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
-        return apiBaseUrl;
-      })
-      .finally(() => {
-        apiConfigRequest = null;
-      });
-  }
-
-  return apiConfigRequest;
+async function fromBackup() {
+  const apiUrl = await mahmud();
+  const res = await axios.get(`${apiUrl}/api/meme`, { timeout: 20000 });
+  const imageUrl = res.data?.imageUrl;
+  if (!imageUrl) throw new Error("no meme from the backup source");
+  const img = await axios.get(imageUrl, { responseType: "arraybuffer", timeout: 30000, headers: { "User-Agent": "Mozilla/5.0" } });
+  return { buffer: Buffer.from(img.data), ext: "jpg" };
 }
 
 module.exports = {
   config: {
     name: "meme",
-    aliases: ["randommeme"],
-    version: "3.0",
-    author: "CRX Shihab",
-    countDown: 5,
+    aliases: ["memes"],
+    version: "2.0",
+    author: "MahMUD",
+    countDown: 10,
     role: 0,
-    shortDescription: "Get random memes or check total count",
-    category: "FUN & SOCIAL",
-    guide: "{pn} or {pn} list"
+    category: "fun",
+    guide: "{pn}   → random meme from Pinterest\n{pn} <topic>   → meme about the topic"
   },
 
-  onStart: async function ({ api, event, args }) {
-    const { threadID, messageID } = event;
-    const BASE_URL = `${await getApiBaseUrl()}/api/meme`;
-
-    if (args[0] === "list") {
-      api.setMessageReaction("📊", messageID, () => {}, true);
-      try {
-        const res = await axios.get(`${BASE_URL}/list`);
-        if (res.data.status === true) {
-          const total = res.data.total;
-          api.setMessageReaction("✅", messageID, () => {}, true);
-          return api.sendMessage(`❖ 𝗠𝗘𝗠𝗘 𝗜𝗡𝗙𝗢 ❖\n━━━━━━━━━━━━━━━━━━\n📊 Total Memes: ${total}\n━━━━━━━━━━━━━━━━━━`, threadID, messageID);
-        }
-      } catch (err) {
-        api.setMessageReaction("❌", messageID, () => {}, true);
-        return api.sendMessage("✕ Failed to fetch meme list!", threadID, messageID);
-      }
+  onStart: async function ({ message, args }) {
+    const topic = args.join(" ").trim();
+    const query = topic ? `${topic} meme` : QUERIES[Math.floor(Math.random() * QUERIES.length)];
+    let image;
+    let reason = "";
+    try { [image] = await tz.fetchImages("/api/search/pin", query, { count: 1 }); }
+    catch (e) { reason = (e && e.message) || String(e); }
+    if (!image) {
+      try { image = await fromBackup(); }
+      catch (e) { return message.reply(`❌ Could not fetch a meme: ${reason || (e && e.message) || "try again"}`.slice(0, 220)); }
     }
-
-    api.setMessageReaction("🐧", messageID, () => {}, true);
-    try {
-      const response = await axios.get(BASE_URL, { responseType: 'stream' });
-      
-      api.setMessageReaction("✅", messageID, () => {}, true);
-      return api.sendMessage({
-        body: "❖ 𝗥𝗔𝗡𝗗𝗢𝗠 𝗠𝗘𝗠𝗘 ❖\n━━━━━━━━━━━━━━━━━━",
-        attachment: response.data
-      }, threadID, messageID);
-
-    } catch (error) {
-      api.setMessageReaction("❌", messageID, () => {}, true);
-      return api.sendMessage("✕ Failed to fetch meme!", threadID, messageID);
-    }
+    return message.reply({
+      attachment: { buffer: image.buffer, fileName: `meme.${image.ext}` }
+    });
   }
 };

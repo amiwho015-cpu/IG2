@@ -658,3 +658,13 @@ MIT © [Saifullah Al Neoaz](https://github.com/lazyneoaz) — see [LICENSE](LICE
 [![MIT License](https://img.shields.io/badge/license-MIT-c13584?style=for-the-badge)](LICENSE)
 
 </div>
+
+## GitHub storage (no MongoDB needed)
+
+Users, threads and `commands/cache/autoreact.json` are mirrored to a GitHub repo so data survives redeploys.
+
+1. Create a **private** repo (e.g. `my-bot-data`) and a token with *Contents: Read & write* on it.
+2. Set env vars on your host: `GITHUB_TOKEN=...` and `GITHUB_REPO=owner/my-bot-data` (optional: `GITHUB_BRANCH`, `GITHUB_PATH`).
+3. Start the bot. On boot it pulls the data; changes are pushed ~20s after they happen, and on shutdown.
+
+Never put the token in a public repo.

@@ -1,705 +1,439 @@
 const axios = require("axios");
-
-const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-downloader";
-let apiBaseUrl = null;
-let apiConfigRequest = null;
-
-async function getApiBaseUrl() {
-  if (apiBaseUrl) return apiBaseUrl;
-
-  if (!apiConfigRequest) {
-    apiConfigRequest = axios
-      .get(API_CONFIG_URL, { timeout: 15000 })
-      .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
-
-        if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
-        }
-
-        apiBaseUrl = baseUrl.replace(/\/+$/, "");
-        return apiBaseUrl;
-      })
-      .finally(() => {
-        apiConfigRequest = null;
-      });
-  }
-
-  return apiConfigRequest;
-}
 const fs = require("fs-extra");
 const path = require("path");
-const http = require("http");
-const https = require("https");
-const { pipeline } = require("stream/promises");
 
-const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+// Main endpoint first, alldlv2 as the backup when it fails or has no link.
+const APIS = [
+  "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldl",
+  "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldlv2"
 ];
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
-const HTTP_AGENT = new http.Agent({
-  keepAlive: true,
-  maxSockets: 32
-});
-const HTTPS_AGENT = new https.Agent({
-  keepAlive: true,
-  maxSockets: 32
-});
+function detectPlatform(url) {
+  const u = url.toLowerCase();
 
-function getUserAgent() {
-  return USER_AGENTS[
-    Math.floor(Math.random() * USER_AGENTS.length)
-  ];
+  if (u.includes("tiktok.com")) return "𝙏𝙞𝙠𝙏𝙤𝙠";
+  if (u.includes("facebook.com") || u.includes("fb.watch")) return "𝙁𝙖𝙘𝙚𝙗𝙤𝙤𝙠";
+  if (u.includes("instagram.com")) return "𝙄𝙣𝙨𝙩𝙖𝙜𝙖𝙢";
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "𝙔𝙤𝙪𝙏𝙖𝙗𝙚";
+  if (u.includes("x.com") || u.includes("twitter.com")) return "𝙏𝙬𝙞𝙩𝙩𝙚𝙧 / 𝙓";
+  if (u.includes("pin.it") || u.includes("pinterest.com")) return "𝙋𝙞𝙣𝙩𝙚𝙧𝙚𝙨𝙩";
+  if (u.includes("soundcloud.com")) return "𝙎𝙤𝙪𝙣𝙙𝘾𝙡𝙤𝙪𝙙";
+  if (u.includes("spotify.com")) return "𝙎𝙥𝙤𝙩𝙞𝙛𝙮";
+  if (u.includes("capcut.com")) return "𝘾𝙖𝙥𝘾𝙪𝙩";
+
+  return "𝙐𝙣𝙠𝙣𝙤𝙬𝙣";
 }
 
-function formatSize(bytes) {
-  if (!bytes || bytes <= 0) return "N/A";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(2)} KB`;
+function cleanUrl(url) {
+  url = url.trim();
+
+  try {
+    const u = new URL(url);
+
+    if (
+      u.hostname.includes("youtube.com") ||
+      u.hostname.includes("youtu.be")
+    ) {
+      return url;
+    }
+
+    return url.split("?")[0];
+  } catch {
+    return url;
   }
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function cleanText(text, max = 55) {
-  if (!text) return "Untitled";
+function findUrl(obj, wantAudio = false) {
+  if (!obj) return null;
 
-  const value = String(text)
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return value.length > max
-    ? `${value.slice(0, max)}…`
-    : value;
-}
-
-function getExtension(url, contentType, isAudio) {
-  const value = String(url || "").toLowerCase();
-  const type = String(contentType || "").toLowerCase();
-
-  if (isAudio) {
-    if (type.includes("mpeg") || value.includes(".mp3")) {
-      return ".mp3";
+  if (typeof obj === "string") {
+    if (
+      obj.startsWith("http://") ||
+      obj.startsWith("https://")
+    ) {
+      return obj;
     }
 
-    if (type.includes("m4a") || value.includes(".m4a")) {
-      return ".m4a";
-    }
-
-    if (type.includes("ogg") || value.includes(".ogg")) {
-      return ".ogg";
-    }
-
-    if (type.includes("wav") || value.includes(".wav")) {
-      return ".wav";
-    }
-
-    return ".mp3";
+    return null;
   }
 
-  if (type.includes("webm") || value.includes(".webm")) {
-    return ".webm";
-  }
-
-  if (type.includes("quicktime") || value.includes(".mov")) {
-    return ".mov";
-  }
-
-  if (type.includes("gif") || value.includes(".gif")) {
-    return ".gif";
-  }
-
-  return ".mp4";
-}
-
-function isHttpUrl(value) {
-  return typeof value === "string" && /^https?:\/\//i.test(value.trim());
-}
-
-function collectMediaLinks(payload) {
-  const videos = [];
-  const audios = [];
-  const seenVideos = new Set();
-  const seenAudios = new Set();
-
-  const addVideo = value => {
-    if (isHttpUrl(value) && !seenVideos.has(value)) {
-      seenVideos.add(value);
-      videos.push(value);
-    }
-  };
-
-  const addAudio = value => {
-    if (isHttpUrl(value) && !seenAudios.has(value)) {
-      seenAudios.add(value);
-      audios.push(value);
-    }
-  };
-
-  const walk = (node, context = null) => {
-    if (Array.isArray(node)) {
-      node.forEach(item => walk(item, context));
-      return;
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findUrl(item, wantAudio);
+      if (found) return found;
     }
 
-    if (!node || typeof node !== "object") return;
+    return null;
+  }
 
-    for (const [key, value] of Object.entries(node)) {
-      const lowerKey = key.toLowerCase();
-      const isAudioContainer =
-        lowerKey === "audio" ||
-        lowerKey === "audios" ||
-        lowerKey === "audiourl" ||
-        lowerKey === "audio_url";
-      const isVideoContainer =
-        lowerKey === "video" ||
-        lowerKey === "videos" ||
-        lowerKey === "downloads" ||
-        lowerKey === "links";
-      const isImageContainer =
-        lowerKey === "image" ||
-        lowerKey === "images" ||
-        lowerKey === "photo" ||
-        lowerKey === "photos" ||
-        lowerKey === "thumbnail" ||
-        lowerKey === "poster";
+  if (typeof obj === "object") {
+    const priorityKeys = [
+      "download",
+      "downloadUrl",
+      "download_url",
+      "downloadLink",
+      "download_link",
+      "high_quality",
+      "highQuality",
+      "video",
+      "videoUrl",
+      "video_url",
+      "url",
+      "audio",
+      "audioUrl",
+      "audio_url",
+      "downloadMp3",
+      "originalVideoUrl",
+      "original_video_url"
+    ];
 
-      if (isHttpUrl(value)) {
-        if (
-          isAudioContainer ||
-          context === "audio" ||
-          lowerKey === "streamurl" ||
-          lowerKey === "stream_url"
-        ) {
-          addAudio(value);
-        } else if (!isImageContainer && context !== "image") {
-          addVideo(value);
-        }
+    for (const key of priorityKeys) {
+      if (obj[key]) {
+        const found = findUrl(obj[key], wantAudio);
+        if (found) return found;
       }
-
-      const nextContext = isAudioContainer
-        ? "audio"
-        : isVideoContainer
-          ? "video"
-          : isImageContainer
-            ? "image"
-            : context;
-
-      walk(value, nextContext);
     }
+
+    if (Array.isArray(obj.formats)) {
+      const usable = obj.formats.filter(x => x && x.url);
+      const isAudioOnly = x => x.vcodec === "none" || x.ext === "mp3" || x.ext === "m4a";
+      const hasVideo = x => x.vcodec !== "none" && x.ext !== "mp3" && x.ext !== "m4a";
+
+      // Audio links (SoundCloud / Spotify) want an audio format; videos (YouTube etc.)
+      // want one with picture AND sound, never an audio-only track sent as .mp4.
+      const pick = wantAudio
+        ? usable.find(isAudioOnly) || usable[0]
+        : usable.find(x => hasVideo(x) && x.acodec !== "none") ||
+          usable.find(hasVideo) ||
+          usable.find(x => !isAudioOnly(x));
+
+      if (pick?.url) {
+        return pick.url;
+      }
+    }
+
+    for (const key of Object.keys(obj)) {
+      const found = findUrl(obj[key], wantAudio);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+function extractDownload(data, wantAudio = false) {
+  if (!data) return null;
+
+  return findUrl(data, wantAudio);
+}
+
+function decodeCapCutUrl(url) {
+  try {
+    if (!url.includes("3bic.com/api/cdn/")) {
+      return null;
+    }
+
+    const encoded = url.split("/api/cdn/")[1];
+
+    if (!encoded) return null;
+
+    return Buffer.from(
+      encoded,
+      "base64"
+    ).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function downloadFile(
+  url,
+  filePath,
+  isCapCut = false
+) {
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+    Accept: "*/*"
   };
 
-  walk(payload);
-  return { videos, audios };
+  if (isCapCut) {
+    headers.Referer = "https://www.capcut.com/";
+    headers.Origin = "https://www.capcut.com";
+  }
+
+  const response = await axios.get(url, {
+    responseType: "arraybuffer",
+    timeout: 120000,
+    maxRedirects: 10,
+    headers
+  });
+
+  await fs.writeFile(
+    filePath,
+    Buffer.from(response.data)
+  );
 }
+
+const SUPPORTED = [
+  "https://vt.tiktok.com",
+  "https://www.tiktok.com/",
+  "https://vm.tiktok.com",
+
+  "https://www.facebook.com/watch/",
+  "https://www.facebook.com/reel/",
+  "https://www.facebook.com/share/v",
+  "https://www.facebook.com/share/r",
+
+  "https://www.instagram.com/reel/",
+  "https://www.instagram.com/p/",
+
+  "https://youtu.be/",
+  "https://youtube.com/",
+  "https://www.youtube.com/",
+  "https://m.youtube.com/",
+  "https://music.youtube.com/",
+
+  "https://x.com/",
+  "https://twitter.com/",
+
+  "https://pin.it/",
+  "https://www.pinterest.com/",
+
+  "https://soundcloud.com/",
+  "https://open.spotify.com/",
+
+  "https://www.capcut.com/",
+  "https://capcut.com/"
+];
 
 module.exports = {
   config: {
     name: "autodl",
-    version: "22.0",
-    author: "CRX Shihab",
-    countDown: 1,
+    version: "7.0",
+    author: "Toshiro Editz",
     role: 0,
-    shortDescription: "Multi-Platform Media Downloader up to 22+",
-    longDescription: "Download video/audio from supported platforms.",
-    category: "MEDIA",
-    guide: "{pn} <link> (or just send the link)"
-  },
-
-  onStart: async function ({ api, event, args, message }) {
-    const url = args[0];
-
-    if (!url) {
-      return message.reply("⚠️ Please provide a media link!");
+    category: "media",
+    description: {
+      en: "Auto download videos and audio from multiple platforms"
+    },
+    guide: {
+      en: "[video/audio link]"
     }
-
-    return this.handleDownload(
-      url,
-      api,
-      event,
-      message,
-      false
-    );
   },
 
-  onChat: async function ({ api, event, message }) {
-    const { body, senderID } = event;
+  onStart: async function () {},
 
-    if (!body || senderID === api.getCurrentUserID()) {
+  onChat: async function ({
+    api,
+    event
+  }) {
+    const text = event.body || "";
+
+    if (!text.startsWith("http")) {
       return;
     }
 
-    const match = body.match(/(https?:\/\/[^\s]+)/i);
-
-    if (!match) return;
-
-    const url = match[0].replace(/[)\]}>.,]+$/, "");
-
-    const supported = [
-      "tiktok.com",
-      "facebook.com",
-      "fb.com",
-      "fb.watch",
-      "instagram.com",
-      "instagr.am",
-      "youtube.com",
-      "youtu.be",
-      "tumblr.com",
-      "l.likee.video", 
-      "likee.video",
-      "pinterest.com",
-      "pin.it",
-      "twitter.com",
-      "x.com",
-      "threads.net",
-      "threads.com",
-      "terabox.com",
-      "1024terabox.com",
-      "spotify.link",
-      "capcut.com",
-      "capcut.net",
-      "spotify.com",
-      "soundcloud.com",
-      "snapchat.com",
-      "snap.com",
-      "reddit.com",
-      "redd.it",
-      "linkedin.com",
-      "lnkd.in",
-      "kuaishou.com",
-      "kwai.com",
-      "douyin.com",
-      "dailymotion.com",
-      "dai.ly",
-      "bsky.app",
-      "bsky.social",
-      "music.apple.com",
-      "snackvideo.com"
-    ];
-
     if (
-      !supported.some(domain =>
-        url.toLowerCase().includes(domain)
+      !SUPPORTED.some(link =>
+        text.startsWith(link)
       )
     ) {
       return;
     }
 
-    return this.handleDownload(
-      url,
-      api,
-      event,
-      message,
+    api.setMessageReaction(
+      "🐤",
+      event.messageID,
+      event.threadID,
+      () => {},
       true
     );
-  },
 
-  handleDownload: async function (
-    url,
-    api,
-    event,
-    message,
-    isAuto = false
-  ) {
-    const { messageID } = event;
-    const start = Date.now();
-    const DOWNLOADER_API = `${await getApiBaseUrl()}/api/video?url=`;
-
-    let filePath = null;
-
-    // React on the message that held the link (⏳ working, ✅ done, ❌ failed).
-    const react = emoji => {
-      try {
-        Promise.resolve(message.react(emoji, messageID)).catch(() => {});
-      } catch {}
-    };
+    const startTime = Date.now();
 
     try {
-      react("⏳");
+      const targetUrl = cleanUrl(text);
+      const platform = detectPlatform(targetUrl);
 
-      const apiUrl =
-        `${DOWNLOADER_API}${encodeURIComponent(url)}`;
+      const isAudio =
+        platform === "𝙎𝙤𝙪𝙣𝙙𝘾𝙡𝙤𝙪𝙙" ||
+        platform === "𝙎𝙥𝙤𝙩𝙞𝙛𝙮";
 
-      const apiResponse = await axios.get(apiUrl, {
-        timeout: 30000,
-        maxRedirects: 10,
-        headers: {
-          "User-Agent": getUserAgent(),
-          "Accept": "application/json"
-        }
-      });
-
-      const apiData = apiResponse.data;
-
-      if (
-        apiData?.success !== true ||
-        apiData?.data?.success === false
-      ) {
-        throw new Error(
-          apiData?.error ||
-          apiData?.data?.error ||
-          "API returned an unsuccessful response."
-        );
-      }
-
-      const result = apiData.data || {};
-      const { videos, audios } =
-        collectMediaLinks(result);
-
-      const videoUrl =
-        videos[0] ||
-        (isHttpUrl(result.url) ? result.url : null);
-
-      const audioUrl =
-        audios[0] ||
-        (isHttpUrl(result.audiourl)
-          ? result.audiourl
-          : null);
-
-      let primaryUrl;
-      let isAudio = false;
-
-      if (videoUrl) {
-        primaryUrl = videoUrl;
-        isAudio = false;
-      } else if (audioUrl) {
-        primaryUrl = audioUrl;
-        isAudio = true;
-      } else {
-        throw new Error(
-          "No video or audio URL found."
-        );
-      }
-
-      const title =
-        result.title ||
-        "Untitled";
-
-      const platform =
-        apiData.platform ||
-        "Unknown";
-
-      const quality =
-        result.quality ||
-        result.videos?.[0]?.quality ||
-        result.audios?.[0]?.quality ||
-        (isAudio ? "Audio" : "Video");
+      const isCapCut =
+        platform === "𝘾𝙖𝙥𝘾𝙪𝙩";
 
       const cacheDir =
-        path.join(
-          __dirname,
-          "cache"
-        );
+        path.join(__dirname, "cache");
 
-      await fs.ensureDir(
-        cacheDir
+      await fs.ensureDir(cacheDir);
+
+      const filePath = path.join(
+        cacheDir,
+        `autodl_${Date.now()}${
+          isAudio ? ".mp3" : ".mp4"
+        }`
       );
 
-      let streamRes;
-      let lastError;
+      let res = null;
+      let downloaded = false;
+      let sawLink = false;
 
-      for (
-        let attempt = 1;
-        attempt <= 3;
-        attempt++
-      ) {
+      for (const api_url of APIS) {
+        let current;
         try {
-          streamRes = await axios({
-            method: "GET",
-            url: primaryUrl,
-            responseType: "stream",
-            timeout: 120000,
-            maxRedirects: 10,
-            maxContentLength: MAX_FILE_SIZE,
-            maxBodyLength: MAX_FILE_SIZE,
-            httpAgent: HTTP_AGENT,
-            httpsAgent: HTTPS_AGENT,
-            headers: {
-              "User-Agent": getUserAgent(),
-              "Accept": "*/*",
-              "Connection": "keep-alive",
-              "Referer":
-                platform.toLowerCase() === "pinterest"
-                  ? "https://www.pinterest.com/"
-                  : "https://www.google.com/"
-            },
-            validateStatus: status =>
-              status >= 200 &&
-              status < 400
-          });
+          current = await axios.get(
+            api_url + "?url=" + encodeURIComponent(targetUrl),
+            { timeout: 60000 }
+          );
+        } catch (err) {
+          console.error(
+            "AutoDL API failed:",
+            api_url,
+            err.response?.status || err.message
+          );
+          continue;
+        }
 
-          break;
-        } catch (error) {
-          lastError = error;
+        const downloadUrl = extractDownload(current.data, isAudio);
 
-          if (attempt < 3) {
-            await new Promise(resolve =>
-              setTimeout(
-                resolve,
-                attempt * 1500
-              )
+        if (!downloadUrl) {
+          console.error("AutoDL API had no link:", api_url);
+          continue;
+        }
+
+        sawLink = true;
+
+        if (isCapCut) {
+          const decoded = decodeCapCutUrl(downloadUrl);
+
+          if (decoded && decoded.startsWith("http")) {
+            try {
+              await downloadFile(decoded, filePath, true);
+              downloaded = true;
+            } catch (err) {
+              console.error(
+                "CapCut decoded download:",
+                err.response?.status || err.message
+              );
+            }
+          }
+        }
+
+        if (!downloaded) {
+          try {
+            await downloadFile(downloadUrl, filePath, isCapCut);
+            downloaded = true;
+          } catch (err) {
+            console.error(
+              "Direct download:",
+              err.response?.status || err.message
             );
           }
         }
+
+        if (downloaded) {
+          res = current;
+          break;
+        }
       }
 
-      if (!streamRes) {
+      if (!sawLink) {
+        api.setMessageReaction(
+          "❌",
+          event.messageID,
+          event.threadID,
+          () => {},
+          true
+        );
+
+        return api.sendMessage(
+          "❌ Video not found or unsupported link.",
+          event.threadID
+        );
+      }
+
+      if (!downloaded) {
         throw new Error(
-          lastError?.message ||
-          "Unable to connect to media server."
+          "Unable to download media"
         );
       }
 
-      const contentType =
-        String(
-          streamRes.headers[
-            "content-type"
-          ] || ""
-        ).toLowerCase();
+      const info =
+        res.data.result?.result ||
+        res.data.result ||
+        res.data;
 
-      const contentLength =
-        Number(
-          streamRes.headers[
-            "content-length"
-          ] || 0
-        );
+      const speed = (
+        (Date.now() - startTime) /
+        1000
+      ).toFixed(2);
 
-      if (
-        contentLength >
-        MAX_FILE_SIZE
-      ) {
-        streamRes.data.destroy();
+      const title =
+        info.title ||
+        info.name ||
+        "No Title";
 
-        throw new Error(
-          "File exceeds 100 MB limit."
-        );
-      }
+      const author =
+        info.authorName ||
+        info.author ||
+        info.artist ||
+        "Unknown";
 
-      if (
-        contentType.includes(
-          "text/html"
-        ) ||
-        contentType.includes(
-          "application/json"
-        ) ||
-        contentType.includes(
-          "text/plain"
-        )
-      ) {
-        streamRes.data.destroy();
+      const msg = {
+        attachment:
+          fs.createReadStream(filePath)
+      };
 
-        throw new Error(
-          "The media URL returned an invalid response."
-        );
-      }
+      api.sendMessage(
+        msg,
+        event.threadID,
+        err => {
+          if (err) {
+            console.error(
+              "Upload Error:",
+              err
+            );
+          }
 
-      const ext =
-        getExtension(
-          primaryUrl,
-          contentType,
-          isAudio
-        );
-
-      const fileName =
-        `alldl_${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2, 8)}${ext}`;
-
-      filePath =
-        path.join(
-          cacheDir,
-          fileName
-        );
-
-      const writer =
-        fs.createWriteStream(
-          filePath,
-          { highWaterMark: 1024 * 1024 }
-        );
-
-      let downloaded =
-        0;
-
-      streamRes.data.on(
-        "data",
-        chunk => {
-          downloaded += chunk.length;
+          api.setMessageReaction(
+            err ? "❌" : "✅",
+            event.messageID,
+            event.threadID,
+            () => {},
+            true
+          );
 
           if (
-            downloaded >
-            MAX_FILE_SIZE
+            fs.existsSync(filePath)
           ) {
-            const error =
-              new Error(
-                "File exceeds 100 MB limit."
-              );
-
-            streamRes.data.destroy(
-              error
-            );
-
-            writer.destroy(
-              error
-            );
+            fs.unlinkSync(filePath);
           }
-        }
+        },
+        event.messageID
       );
 
-      streamRes.data.on(
-        "error",
-        error => {
-          writer.destroy(
-            error
-          );
-        }
-      );
-
-      await pipeline(
-        streamRes.data,
-        writer
-      );
-
-      const stats =
-        await fs.stat(
-          filePath
-        );
-
-      if (!stats.size) {
-        await fs.remove(
-          filePath
-        );
-
-        filePath = null;
-
-        throw new Error(
-          "Downloaded file is empty."
-        );
-      }
-
-      if (
-        stats.size >
-        MAX_FILE_SIZE
-      ) {
-        await fs.remove(
-          filePath
-        );
-
-        filePath = null;
-
-        throw new Error(
-          "File exceeds 100 MB limit."
-        );
-      }
-
-      // Video only: no caption, no info text — just the media.
-      try {
-        await message.reply({
-          attachment:
-            fs.createReadStream(
-              filePath
-            )
-        });
-      } catch (sendError) {
-        console.error("[ALLDL SEND ERROR]", sendError.message);
-        throw sendError;
-      }
-
-      await fs.remove(
-        filePath
-      );
-
-      filePath = null;
-
-      react("✅");
-
-    } catch (error) {
+    } catch (err) {
       console.error(
-        "[ALLDL ERROR]",
-        error.message
+        "AutoDL Error:",
+        err
       );
 
-      console.error(
-        "Code:",
-        error.code || "N/A"
+      api.setMessageReaction(
+        "❌",
+        event.messageID,
+        event.threadID,
+        () => {},
+        true
       );
 
-      console.error(
-        "URL:",
-        error.config?.url || url
+      api.sendMessage(
+        `❌ Error: ${
+          err.response?.status ||
+          err.message
+        }`,
+        event.threadID
       );
-
-      try {
-        if (
-          filePath &&
-          await fs.pathExists(
-            filePath
-          )
-        ) {
-          await fs.remove(
-            filePath
-          );
-        }
-      } catch {}
-
-      react("❌");
-
-      if (!isAuto) {
-        let errorMessage =
-          error.message ||
-          "Download failed.";
-
-        if (
-          error.code ===
-          "ECONNRESET"
-        ) {
-          errorMessage =
-            "Connection reset by media server. Please try again.";
-        }
-
-        if (
-          error.code ===
-            "ETIMEDOUT" ||
-          error.code ===
-            "ECONNABORTED"
-        ) {
-          errorMessage =
-            "Download timed out. Please try again.";
-        }
-
-        if (
-          error.code ===
-          "ERR_STREAM_PREMATURE_CLOSE"
-        ) {
-          errorMessage =
-            "Media stream closed unexpectedly. Please try again.";
-        }
-
-        if (
-          error.response?.status ===
-          403
-        ) {
-          errorMessage =
-            "Media server denied access.";
-        }
-
-        if (
-          error.response?.status ===
-          404
-        ) {
-          errorMessage =
-            "Media URL expired or not found.";
-        }
-
-        await message.reply(
-          `❌ ${errorMessage}`
-        );
-      }
     }
   }
 };

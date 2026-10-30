@@ -56,8 +56,25 @@ function createMessageContext({ api, event, log }) {
 			let index = 0;
 			let firstResult = null;
 			let textResult = null;
+			const mediaIDs = [];
+			// With a body the caller gets the TEXT message's result, but players often
+			// reply to the image that follows it. Expose every id that was sent as
+			// `messageIDs` so reply handlers can be armed on all of them.
+			const finish = () => {
+				const base = textResult || firstResult;
+				if (!base || typeof base !== "object") return resolve(base);
+				const ids = [base.messageID, ...mediaIDs].filter(id => id != null).map(String);
+				const unique = ids.filter((id, i) => ids.indexOf(id) === i);
+				try {
+					if (unique.length > 1) Object.defineProperty(base, "messageIDs", { value: unique, enumerable: false, configurable: true, writable: true });
+					// A media-only message has no text, so a reply to it carries no quoted body to match on.
+					if (!hasBody) Object.defineProperty(base, "mediaOnly", { value: true, enumerable: false, configurable: true, writable: true });
+				}
+				catch (_) { /* frozen result: these are only conveniences */ }
+				return resolve(base);
+			};
 			const sendMedia = () => {
-				if (index >= sources.length) return resolve(textResult || firstResult);
+				if (index >= sources.length) return finish();
 				const current = index++;
 				const raw = sources[current];
 				const kind = utils.mediaKind(raw);
@@ -66,6 +83,7 @@ function createMessageContext({ api, event, log }) {
 				const done = (error, result) => {
 					if (error) return reject(error);
 					if (current === 0) firstResult = result;
+					if (result && typeof result === "object" && result.messageID != null) mediaIDs.push(result.messageID);
 					sendMedia();
 				};
 				try {

@@ -1,17 +1,13 @@
 "use strict";
 
-const { listGroups } = require("../src/groupUtil");
+const { listGroups, joinUser } = require("../src/groupUtil");
 
 const LIMIT = 10;
 
 function pageText(groups, page, totalPages) {
 	const slice = groups.slice((page - 1) * LIMIT, page * LIMIT);
-	let out = "╭──────╮\n│ GROUP LIST\n├──────┤\n";
-	slice.forEach((g, i) => {
-		out += `│${i + 1}. ${g.name || "Unnamed Group"}\n│TID: ${g.threadID}\n├──────┤\n`;
-	});
-	out += `│ Page: ${page}/${totalPages} • Total: ${groups.length}\n╰──────╯\n\n💡 Reply with:\n"next" / "back" / page number\n"left <num>" — bot leaves that group (e.g. left 1 2)\n"join <num>" — adds you to that group`;
-	return out;
+	const lines = slice.map((g, i) => `${(page - 1) * LIMIT + i + 1}. ${g.name || "Unnamed Group"} (${g.threadID})`);
+	return `Groups ${page}/${totalPages} (${groups.length})\n${lines.join("\n")}\nnext / back / <page> | left <num> | join <num> [uid]`;
 }
 
 module.exports = {
@@ -50,30 +46,34 @@ module.exports = {
 		const parts = String(event.body || "").trim().split(/\s+/);
 		const action = (parts[0] || "").toLowerCase();
 		const totalPages = Math.ceil(allGroups.length / LIMIT);
-		const pick = n => allGroups[(page - 1) * LIMIT + (n - 1)];
+		const pick = n => allGroups[n - 1];
 
 		if (action === "left" || action === "out") {
-			const nums = parts.slice(1).map(Number).filter(n => Number.isInteger(n) && n > 0);
+			const nums = [...new Set(parts.slice(1).map(Number).filter(n => Number.isInteger(n) && n > 0))];
 			if (!nums.length) return message.reply("⚠️ Give group number(s). Example: left 1 or left 1 2 3");
 			let left = 0;
+			const failed = [];
 			for (const n of nums) {
 				const g = pick(n);
-				if (!g) continue;
-				try { await api.removeUserFromGroup(api.getCurrentUserID(), g.threadID); left++; }
-				catch (_) { /* skip a group we could not leave */ }
+				if (!g) { failed.push(`#${n} (no such number)`); continue; }
+				try { await api.leaveGroup(g.threadID); left++; }
+				catch (error) { failed.push(`#${n} (${(error && (error.error || error.message)) || error})`); }
 			}
-			return message.reply(`✅ Left ${left} group(s).`);
+			return message.reply(`✅ Left ${left} group(s).` + (failed.length ? `\n❌ Failed: ${failed.join(", ")}` : ""));
 		}
 
 		if (action === "join") {
 			const g = pick(Number(parts[1]));
 			if (!g) return message.reply("⚠️ Invalid group number. Example: join 1");
+			const uid = /^\d+$/.test(parts[2] || "") ? parts[2] : event.senderID;
+			const label = g.name || g.threadID;
 			try {
-				await api.addUserToGroup(event.senderID, g.threadID);
-				return message.reply(`✅ You were added to "${g.name || g.threadID}".`);
+				const res = await joinUser(api, uid, g.threadID);
+				if (res.already) return message.reply(`ℹ️ Already in "${label}".`);
+				return message.reply(`✅ Added to "${label}".${res.followed ? " (bot followed the account first)" : ""}`);
 			}
 			catch (error) {
-				return message.reply(`❌ Could not add you to "${g.name || g.threadID}". (${error.message || error})`);
+				return message.reply(`❌ Could not add to "${label}". (${error.message || error})`);
 			}
 		}
 

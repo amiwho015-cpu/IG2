@@ -281,12 +281,13 @@ async function sendFirstSong(api, event, track) {
             throw new Error("Song file 25 MB-er beshi.");
         }
 
+        const duration = formatDuration(track.duration);
+
         const stream = fs.createReadStream(file);
 
         await new Promise((resolve, reject) => {
             api.sendMessage(
                 {
-                    body: `🎧 Song: ${track.title}\n🎤 Publisher: ${track.artist}\n\n😘 Enjoy Using CRX Shihab Robot..`,
                     attachment: stream
                 },
                 event.threadID,
