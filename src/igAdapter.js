@@ -103,7 +103,7 @@ async function login(params) {
 		pollIntervalMs: Math.max(1000, Number(settings.pollIntervalMs) || 2500),
 		idlePollIntervalMs: Math.max(1000, Number(settings.idlePollIntervalMs) || 8000),
 		adaptivePolling: settings.adaptivePolling !== false,
-		throttle: settings.throttle === false ? false : Object.assign({ minGapMs: 700, perThreadGapMs: 1200, jitterMs: 300 }, settings.throttle || {}),
+		throttle: settings.throttle === false ? false : Object.assign({ minGapMs: 450, perThreadGapMs: 700, jitterMs: 150 }, settings.throttle || {}),
 		requestTimeoutMs: Number(settings.requestTimeoutMs) || 20000,
 		maxRetries: settings.maxRetries != null ? Number(settings.maxRetries) : 2,
 		debug: settings.debug === true
@@ -119,6 +119,17 @@ async function login(params) {
 		if (!messageID || !threadID) return;
 		threadOf.set(str(messageID), str(threadID));
 		if (threadOf.size > 20000) threadOf.delete(threadOf.keys().next().value);
+	};
+	// messageID -> { senderId, text }: lets a reply resolve WHO it replies to even when
+	// Instagram's payload carries only the quoted message id (this is what the reply-to-
+	// target commands like kill/slap/hug read as event.messageReply.senderID).
+	const metaOf = new Map();
+	const rememberMeta = (messageID, senderId, text) => {
+		if (!messageID) return;
+		const key = str(messageID);
+		const prev = metaOf.get(key) || {};
+		metaOf.set(key, { senderId: senderId ? str(senderId) : prev.senderId, text: text || prev.text || "" });
+		if (metaOf.size > 20000) metaOf.delete(metaOf.keys().next().value);
 	};
 	const sentByBot = new Set();
 	const rememberSent = id => {
@@ -147,7 +158,7 @@ async function login(params) {
 
 	function toResult(res, threadID) {
 		const id = res && (res.id || res.messageID || res.messageId || res.item_id);
-		if (id) { remember(id, threadID); rememberSent(id); }
+		if (id) { remember(id, threadID); rememberSent(id); rememberMeta(id, client.userId, ""); }
 		const out = { threadID: str(threadID), messageID: id ? str(id) : null, timestamp: (res && res.timestamp) || Date.now() };
 		if (res && Array.isArray(res.attachments) && res.attachments.length) out.attachments = res.attachments;
 		if (res && res.textMessage) {
@@ -235,18 +246,46 @@ async function login(params) {
 	// ---------- lookups ----------
 
 	const userCache = new Map(); // key -> { at, value }
-	const USER_TTL = 10 * 60 * 1000;
+	const USER_TTL = 60 * 60 * 1000;          // a profile is fresh for 1 hour
+	const inflight = new Map();               // key -> Promise (one request for many callers)
+	let lookupBlockedUntil = 0;               // after a 429, lookups fail fast until this time
+
+	const isRateLimited = e => !!e && (e.status === 429 || e.code === "RATE_LIMIT" || /\b429\b|rate.?limit|too many requests|feedback/i.test(String(e.message || e)));
 
 	async function lookupUser(idOrName) {
-		const key = str(idOrName).replace(/^@/, "");
-		const hit = userCache.get(key.toLowerCase());
+		const key = str(idOrName).replace(/^@/, "").toLowerCase();
+		const hit = userCache.get(key);
 		if (hit && Date.now() - hit.at < USER_TTL) return hit.value;
+		// Instagram just throttled us: answer from the (stale) cache or fail at once
+		// instead of making every command wait for another 429.
+		if (Date.now() < lookupBlockedUntil) {
+			if (hit) return hit.value;
+			const wait = Math.ceil((lookupBlockedUntil - Date.now()) / 1000);
+			throw Object.assign(new Error(`Instagram rate limit (429): lookups paused, retry in ~${wait}s`), { status: 429, code: "RATE_LIMIT" });
+		}
+		if (inflight.has(key)) return inflight.get(key);
 		const numeric = /^\d+$/.test(key);
-		const user = numeric ? await client.getUserById(key) : await client.getUserByUsername(key);
-		const value = mapUser(user, numeric ? key : undefined);
-		userCache.set(key.toLowerCase(), { at: Date.now(), value });
-		if (value.userID) userCache.set(value.userID, { at: Date.now(), value });
-		return value;
+		const job = (async () => {
+			try {
+				const user = numeric ? await client.getUserById(key) : await client.getUserByUsername(key);
+				const value = mapUser(user, numeric ? key : undefined);
+				userCache.set(key, { at: Date.now(), value });
+				if (value.userID) userCache.set(value.userID, { at: Date.now(), value });
+				return value;
+			}
+			catch (error) {
+				if (isRateLimited(error)) {
+					const ra = Number(error && (error.retryAfter || (error.details && error.details.retryAfter))) || 0;
+					lookupBlockedUntil = Date.now() + Math.min(180000, Math.max(30000, ra * 1000));
+					log.warn("LOOKUP", `Instagram rate limit, lookups paused for ${Math.round((lookupBlockedUntil - Date.now()) / 1000)}s`);
+					if (hit) return hit.value;
+				}
+				throw error;
+			}
+			finally { inflight.delete(key); }
+		})();
+		inflight.set(key, job);
+		return job;
 	}
 
 	api.getUserInfo = function getUserInfo(ids, ...rest) {
@@ -266,6 +305,18 @@ async function login(params) {
 			return out;
 		}, cb);
 	};
+
+	api.getDiagnostics = () => ({
+		username: client.username || null,
+		userId: str(client.userId),
+		pollDelayMs: client.realtime ? client.realtime.currentDelayMs : null,
+		pollErrors: client.realtime ? client.realtime.consecutiveErrors : null,
+		pollRunning: client.realtime ? !!client.realtime.isRunning : null,
+		lookupPausedForSec: Math.max(0, Math.ceil((lookupBlockedUntil - Date.now()) / 1000)),
+		cachedProfiles: userCache.size,
+		cachedThreads: threadCache.size,
+		knownMessages: metaOf.size
+	});
 
 	api.searchUsers = function searchUsers(query, ...rest) {
 		return bridge(async () => {
@@ -295,8 +346,28 @@ async function login(params) {
 		};
 	}
 
+	const threadCache = new Map(); // threadID -> { at, value }
+	const threadInflight = new Map();
+	const THREAD_TTL = 45 * 1000;
 	api.getThreadInfo = function getThreadInfo(threadID, ...rest) {
-		return bridge(async () => mapThread(await client.getConversation(str(threadID)), threadID), findCb(...rest));
+		return bridge(async () => {
+			const tid = str(threadID);
+			const hit = threadCache.get(tid);
+			if (hit && Date.now() - hit.at < THREAD_TTL) return hit.value;
+			if (threadInflight.has(tid)) return threadInflight.get(tid);
+			const job = (async () => {
+				try {
+					const value = mapThread(await client.getConversation(tid), threadID);
+					threadCache.set(tid, { at: Date.now(), value });
+					if (threadCache.size > 300) threadCache.delete(threadCache.keys().next().value);
+					return value;
+				}
+				catch (error) { if (hit) return hit.value; throw error; }
+				finally { threadInflight.delete(tid); }
+			})();
+			threadInflight.set(tid, job);
+			return job;
+		}, findCb(...rest));
 	};
 
 	api.getThreadList = function getThreadList(limit, timestamp, tags, ...rest) {
@@ -407,7 +478,46 @@ async function login(params) {
 		return out;
 	}
 
-	function messageEvent(msg) {
+	function rawReplySender(msg) {
+		const raw = msg.raw || {};
+		const rep = raw.replied_to_message || raw.reply_to_message || raw.reply_source_message || {};
+		if (rep.is_sent_by_viewer === true) return str(client.userId);
+		const cand = rep.user_id || rep.sender_igid || rep.sender_id || rep.sender_fbid ||
+			(rep.sender && (rep.sender.igid || rep.sender.id)) ||
+			raw.replied_to_user_id || raw.reply_to_user_id || raw.replied_to_message_user_id;
+		return cand ? str(cand) : "";
+	}
+
+	async function resolveReplySender(msg) {
+		const rid = str(msg.replyTo.id);
+		let sender = msg.replyTo.senderId && str(msg.replyTo.senderId);
+		let text = msg.replyTo.text || "";
+		if (!sender) sender = rawReplySender(msg);
+		const meta = metaOf.get(rid);
+		if (!sender && meta && meta.senderId) sender = meta.senderId;
+		if (!text && meta && meta.text) text = meta.text;
+		if (!sender || !text) {
+			// Last resort: read the recent thread history once and find the quoted message there.
+			try {
+				const conv = await Promise.race([
+					client.getConversation(str(msg.threadId)),
+					new Promise((_, rej) => setTimeout(() => rej(new Error("history lookup timed out")), 5000))
+				]);
+				for (const m of (conv && conv.messages) || []) {
+					const mid = str(m && (m.id || m.itemId));
+					if (!mid) continue;
+					const sid = m.senderId || m.userId || (m.sender && m.sender.id);
+					if (sid) rememberMeta(mid, sid, m.text || "");
+				}
+				const found = metaOf.get(rid);
+				if (found) { if (!sender && found.senderId) sender = found.senderId; if (!text && found.text) text = found.text; }
+			}
+			catch (_) { /* keep what we have */ }
+		}
+		return { sender: sender || "", text };
+	}
+
+	function messageEvent(msg, replied) {
 		const event = {
 			type: "message",
 			threadID: str(msg.threadId),
@@ -423,8 +533,8 @@ async function login(params) {
 		if (msg.replyTo && msg.replyTo.id) {
 			event.repliedToMessage = {
 				messageID: str(msg.replyTo.id),
-				senderID: str(msg.replyTo.senderId),
-				body: msg.replyTo.text || "",
+				senderID: replied ? replied.sender : str(msg.replyTo.senderId),
+				body: replied ? replied.text : (msg.replyTo.text || ""),
 				attachments: [],
 				timestamp: null
 			};
@@ -443,13 +553,16 @@ async function login(params) {
 	client.on(Events.MESSAGE, async msg => {
 		if (!msg) return;
 		remember(msg.id, msg.threadId);
+		rememberMeta(msg.id, msg.isSelf ? client.userId : msg.senderId, msg.text || "");
 		if (msg.isSelf) {
 			// Our own sends come back through polling; give send() a moment to register the id,
 			// then only deliver messages typed from another device (and only with selfListen).
 			await sleep(1500);
 			if (!selfListen || sentByBot.has(str(msg.id))) return;
 		}
-		emitToListeners(null, messageEvent(msg));
+		let replied = null;
+		if (msg.replyTo && msg.replyTo.id) replied = await resolveReplySender(msg);
+		emitToListeners(null, messageEvent(msg, replied));
 	});
 
 	client.on(Events.REACTION, r => {

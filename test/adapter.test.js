@@ -219,3 +219,61 @@ test("sendTypingIndicator returns a stop function", async () => {
 	await wait(5);
 	assert.deepEqual(api.client.calls.map(c => c.args[1]), [true, false]);
 });
+
+test("a 429 on a profile lookup pauses lookups and later calls fail fast (or use the cache)", async () => {
+	const api = await make();
+	let hits = 0;
+	api.client.getUserByUsername = async () => { hits++; throw Object.assign(new Error("Rate limit reached"), { status: 429, retryAfter: 5 }); };
+	await assert.rejects(() => api.getUserInfo("someone"), /rate/i);
+	const t0 = Date.now();
+	await assert.rejects(() => api.getUserInfo("other"), /rate limit|paused/i);
+	assert.ok(Date.now() - t0 < 200, "paused lookup must fail immediately");
+	assert.equal(hits, 1, "no second request while paused");
+});
+
+test("profile lookups are cached and de-duplicated; thread info is cached", async () => {
+	const api = await make();
+	let n = 0, convs = 0;
+	api.client.getUserByUsername = async name => { n++; await wait(20); return { id: "9", username: name, fullName: "N" }; };
+	api.client.getConversation = async id => { convs++; return { id, isGroup: true, title: "G", participants: [{ id: "1" }], adminUserIds: [], nicknames: {}, messages: [] }; };
+	await Promise.all([api.getUserInfo("bob"), api.getUserInfo("bob"), api.getUserInfo("@bob")]);
+	await api.getUserInfo("bob");
+	assert.equal(n, 1);
+	await Promise.all([api.getThreadInfo("t1"), api.getThreadInfo("t1")]);
+	await api.getThreadInfo("t1");
+	assert.equal(convs, 1);
+});
+
+test("reactions and typing bypass the send throttle queue; messages do not", () => {
+	const { isThrottledUrl } = require(path.join(root, "lib/instachat-api/src/utils/throttle"));
+	const base = "https://i.instagram.com/api/v1/direct_v2/threads/broadcast/";
+	assert.equal(isThrottledUrl(base + "text/"), true);
+	assert.equal(isThrottledUrl(base + "reaction/"), false);
+	assert.equal(isThrottledUrl(base + "indicate_activity/"), false);
+});
+
+test("a reply always carries WHO it replies to (payload, seen-message cache, or thread history)", async () => {
+	const api = await make();
+	const got = [];
+	api.listenMqtt((e, ev) => { if (!e && ev.type === "message") got.push(ev); });
+	const { Events } = require(path.join(root, "lib/instachat-api/src"));
+
+	// 1. quoted message was seen earlier, payload has no sender id
+	api.client.emit(Events.MESSAGE, msg({ id: "orig1", senderId: "77", text: "Kno mar khabi?" }));
+	api.client.emit(Events.MESSAGE, msg({ id: "r1", senderId: "5", text: "-kill", replyTo: { id: "orig1", senderId: "", text: "" } }));
+	// 2. quoted message never seen: found in the thread history
+	api.client.getConversation = async id => ({ id, isGroup: true, title: "G", participants: [], adminUserIds: [], nicknames: {},
+		messages: [{ id: "old9", senderId: "88", text: "old text" }] });
+	api.client.emit(Events.MESSAGE, msg({ id: "r2", senderId: "5", text: "-kill", replyTo: { id: "old9", senderId: "", text: "" } }));
+	// 3. quoted message is one the bot sent
+	await api.sendMessage("hello", "t1");
+	const sentId = api.client.calls.find(c => c.name === "sendMessage") && "sent1";
+	api.client.emit(Events.MESSAGE, msg({ id: "r3", senderId: "5", text: "x", replyTo: { id: sentId, senderId: "", text: "" } }));
+	await wait(120);
+
+	const by = id => got.find(e => e.messageID === id);
+	assert.equal(by("r1").repliedToMessage.senderID, "77");
+	assert.equal(by("r1").repliedToMessage.body, "Kno mar khabi?");
+	assert.equal(by("r2").repliedToMessage.senderID, "88");
+	assert.equal(by("r3").repliedToMessage.senderID, "100");
+});

@@ -125,9 +125,9 @@ function loadConfig() {
 	if (ic.adaptivePolling == null) ic.adaptivePolling = true;
 	if (ic.throttle !== false) {
 		ic.throttle = ic.throttle && typeof ic.throttle === "object" ? ic.throttle : {};
-		if (ic.throttle.minGapMs == null) ic.throttle.minGapMs = 700;
-		if (ic.throttle.perThreadGapMs == null) ic.throttle.perThreadGapMs = 1200;
-		if (ic.throttle.jitterMs == null) ic.throttle.jitterMs = 300;
+		if (ic.throttle.minGapMs == null) ic.throttle.minGapMs = 450;
+		if (ic.throttle.perThreadGapMs == null) ic.throttle.perThreadGapMs = 700;
+		if (ic.throttle.jitterMs == null) ic.throttle.jitterMs = 150;
 	}
 	config.optionsFca = config.optionsFca && typeof config.optionsFca === "object" ? config.optionsFca : {};
 
