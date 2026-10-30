@@ -239,7 +239,7 @@ function createBot(config) {
 			return Promise.reject(error);
 		}
 
-		log.info("BOOT", `login mode: ${mode} (build instachat-4)`);
+		log.info("BOOT", `login mode: ${mode} (build instachat-5)`);
 		return new Promise((resolve, reject) => {
 			const finish = async (error, api) => {
 				if (error) return reject(error);

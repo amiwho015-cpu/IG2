@@ -246,6 +246,13 @@ async function login(params) {
 	// ---------- lookups ----------
 
 	const userCache = new Map(); // key -> { at, value }
+	const seenProfiles = new Map(); // userID/username -> basic profile learned from group member lists
+	const learnProfile = value => {
+		if (!value || !value.userID) return;
+		seenProfiles.set(value.userID, value);
+		if (value.username) seenProfiles.set(String(value.username).toLowerCase(), value);
+		if (seenProfiles.size > 5000) seenProfiles.delete(seenProfiles.keys().next().value);
+	};
 	const USER_TTL = 60 * 60 * 1000;          // a profile is fresh for 1 hour
 	const inflight = new Map();               // key -> Promise (one request for many callers)
 	let lookupBlockedUntil = 0;               // after a 429, lookups fail fast until this time
@@ -256,10 +263,17 @@ async function login(params) {
 		const key = str(idOrName).replace(/^@/, "").toLowerCase();
 		const hit = userCache.get(key);
 		if (hit && Date.now() - hit.at < USER_TTL) return hit.value;
+		// The bot's own account is already known from login: never spend a request on it.
+		if (key === str(client.userId).toLowerCase() || (client.username && key === String(client.username).toLowerCase())) {
+			const me = mapUser({ id: client.userId, username: client.username, fullName: client.fullName || client.username }, str(client.userId));
+			userCache.set(key, { at: Date.now(), value: me });
+			return me;
+		}
 		// Instagram just throttled us: answer from the (stale) cache or fail at once
 		// instead of making every command wait for another 429.
 		if (Date.now() < lookupBlockedUntil) {
 			if (hit) return hit.value;
+			if (seenProfiles.has(key)) return seenProfiles.get(key);
 			const wait = Math.ceil((lookupBlockedUntil - Date.now()) / 1000);
 			throw Object.assign(new Error(`Instagram rate limit (429): lookups paused, retry in ~${wait}s`), { status: 429, code: "RATE_LIMIT" });
 		}
@@ -279,6 +293,7 @@ async function login(params) {
 					lookupBlockedUntil = Date.now() + Math.min(180000, Math.max(30000, ra * 1000));
 					log.warn("LOOKUP", `Instagram rate limit, lookups paused for ${Math.round((lookupBlockedUntil - Date.now()) / 1000)}s`);
 					if (hit) return hit.value;
+					if (seenProfiles.has(key)) return seenProfiles.get(key);
 				}
 				throw error;
 			}
@@ -336,7 +351,7 @@ async function login(params) {
 			name: conv.isGroup ? (conv.title || "") : "",
 			isGroup: Boolean(conv.isGroup),
 			participantIDs: ids,
-			userInfo: participants.map(p => mapUser(p)),
+			userInfo: participants.map(p => { const v = mapUser(p); learnProfile(v); return v; }),
 			adminIDs: (conv.adminUserIds || []).map(id => ({ id: str(id) })),
 			emoji: null,
 			imageSrc: conv.imageUrl || null,

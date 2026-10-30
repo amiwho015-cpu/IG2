@@ -277,3 +277,15 @@ test("a reply always carries WHO it replies to (payload, seen-message cache, or 
 	assert.equal(by("r2").repliedToMessage.senderID, "88");
 	assert.equal(by("r3").repliedToMessage.senderID, "100");
 });
+
+test("the bot's own profile and group members are answered without hitting Instagram", async () => {
+	const api = await make();
+	let hits = 0;
+	api.client.getUserById = async id => { hits++; throw Object.assign(new Error("Rate limit reached"), { status: 429 }); };
+	const me = await api.getUserInfo("100");
+	assert.equal(me["100"].vanity, "botuser");
+	assert.equal(hits, 0, "self lookup must not use the network");
+	await api.getThreadInfo("t9");                 // learns members "1" (a) and "2" (b)
+	const other = await api.getUserInfo("1");      // throttled -> falls back to the member list
+	assert.equal(other["1"].vanity, "a");
+});

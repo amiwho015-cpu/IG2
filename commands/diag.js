@@ -21,7 +21,7 @@ module.exports = {
 		const up = global.instabotStartedAt ? Math.round((Date.now() - global.instabotStartedAt) / 60000) : null;
 		const r = event.messageReply;
 		const lines = [
-			"🩺 DIAG  (build instachat-4)",
+			"🩺 DIAG  (build instachat-5)",
 			`mode: ${(global.GoatBot && global.GoatBot.config && global.GoatBot.config.server && global.GoatBot.config.server.mode) || "instachat"}`,
 			`bot: @${d.username || "?"} (${d.userId || "?"})`,
 			`uptime: ${up == null ? "?" : up + " min"}`,

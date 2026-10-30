@@ -19,6 +19,8 @@ function createDispatcher({ api, config, registry, database }) {
 	const onReply = new Map(); // messageID -> { commandName, handler, at }
 	const onReaction = new Map(); // messageID -> { commandName, handler, at }
 	const refreshedUsers = new Set();
+	const refreshRetryAt = new Map(); // userID -> time before which we do not ask Instagram again
+	let lastBackgroundRefresh = 0;
 
 	// Reply/reaction handlers are keyed by message id and were never removed, so
 	// a long-running bot leaked one closure per command that arms a handler (AI,
@@ -492,9 +494,17 @@ function createDispatcher({ api, config, registry, database }) {
 
 	function refreshUserIfNeeded(userData, userID) {
 		if (!userData || userData.name || refreshedUsers.has(userID)) return;
-		refreshedUsers.add(userID);
+		// Name lookups are cosmetic: at most one every 4s, none while Instagram is throttling us,
+		// and a failed one is retried only after 10 minutes (bursts are what trigger the 429s).
+		const now = Date.now();
+		if ((refreshRetryAt.get(userID) || 0) > now || now - lastBackgroundRefresh < 4000) return;
+		const diag = typeof api.getDiagnostics === "function" ? api.getDiagnostics() : null;
+		if (diag && diag.lookupPausedForSec > 0) return;
+		lastBackgroundRefresh = now;
+		refreshRetryAt.set(userID, now + 10 * 60 * 1000);
 		api.getUserInfo(userID, (error, info) => {
 			if (error || !info || !info[userID]) return;
+			refreshedUsers.add(userID);
 			const profile = info[userID];
 			database.users.update(userID, {
 				name: profile.name || profile.firstName || null,
