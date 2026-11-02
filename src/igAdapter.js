@@ -156,9 +156,11 @@ async function login(params) {
 
 	// ---------- sending ----------
 
-	function toResult(res, threadID) {
+	const lastBotSendAt = new Map();   // threadID -> time of the bot's latest message there
+	function toResult(res, threadID, sentText) {
+		lastBotSendAt.set(str(threadID), Date.now());
 		const id = res && (res.id || res.messageID || res.messageId || res.item_id);
-		if (id) { remember(id, threadID); rememberSent(id); rememberMeta(id, client.userId, ""); }
+		if (id) { remember(id, threadID); rememberSent(id); rememberMeta(id, client.userId, sentText || ""); }
 		const out = { threadID: str(threadID), messageID: id ? str(id) : null, timestamp: (res && res.timestamp) || Date.now() };
 		if (res && Array.isArray(res.attachments) && res.attachments.length) out.attachments = res.attachments;
 		if (res && res.textMessage) {
@@ -195,7 +197,7 @@ async function login(params) {
 			const res = reply
 				? await client.reply(tid, reply, payload)
 				: await client.sendMessage(tid, payload);
-			return toResult(res, tid);
+			return toResult(res, tid, typeof payload === "string" ? payload : (payload && payload.body) || "");
 		}, cb);
 	};
 
@@ -493,43 +495,104 @@ async function login(params) {
 		return out;
 	}
 
-	function rawReplySender(msg) {
-		const raw = msg.raw || {};
-		const rep = raw.replied_to_message || raw.reply_to_message || raw.reply_source_message || {};
+	const REPLY_KEY = /^(replied_to_message|reply_to_message|reply_source_message|replied_to|reply_to|reply|quoted_message|quote)$/i;
+	const pickSender = rep => {
+		if (!rep || typeof rep !== "object") return "";
 		if (rep.is_sent_by_viewer === true) return str(client.userId);
-		const cand = rep.user_id || rep.sender_igid || rep.sender_id || rep.sender_fbid ||
-			(rep.sender && (rep.sender.igid || rep.sender.id)) ||
-			raw.replied_to_user_id || raw.reply_to_user_id || raw.replied_to_message_user_id;
-		return cand ? str(cand) : "";
+		const c = rep.user_id || rep.sender_igid || rep.sender_id || rep.sender_fbid || rep.user_pk ||
+			(rep.sender && (rep.sender.igid || rep.sender.pk || rep.sender.id)) || (rep.user && (rep.user.pk || rep.user.id));
+		return c ? str(c) : "";
+	};
+
+	/** Look for a reply reference anywhere in a raw Instagram item (names differ between endpoints). */
+	function deepReplyRef(raw, depth = 0) {
+		if (!raw || typeof raw !== "object" || depth > 3) return null;
+		for (const key of Object.keys(raw)) {
+			const v = raw[key];
+			if (REPLY_KEY.test(key) && v && typeof v === "object") {
+				const id = v.item_id || v.message_id || v.id || v.client_context;
+				if (id) return { id: str(id), sender: pickSender(v), text: v.text || v.text_body || (v.content && v.content.text_body) || "" };
+			}
+			if (/^(replied_to_message_id|reply_to_message_id|replied_to_item_id|reply_to_item_id|reply_item_id)$/i.test(key) && (typeof v === "string" || typeof v === "number") && v) {
+				return { id: str(v), sender: str(raw.replied_to_user_id || raw.reply_to_user_id || ""), text: "" };
+			}
+		}
+		for (const key of Object.keys(raw)) {
+			const v = raw[key];
+			if (v && typeof v === "object" && !Array.isArray(v)) { const r = deepReplyRef(v, depth + 1); if (r) return r; }
+		}
+		return null;
 	}
 
-	async function resolveReplySender(msg) {
-		const rid = str(msg.replyTo.id);
-		let sender = msg.replyTo.senderId && str(msg.replyTo.senderId);
-		let text = msg.replyTo.text || "";
-		if (!sender) sender = rawReplySender(msg);
-		const meta = metaOf.get(rid);
-		if (!sender && meta && meta.senderId) sender = meta.senderId;
-		if (!text && meta && meta.text) text = meta.text;
-		if (!sender || !text) {
-			// Last resort: read the recent thread history once and find the quoted message there.
-			try {
-				const conv = await Promise.race([
-					client.getConversation(str(msg.threadId)),
-					new Promise((_, rej) => setTimeout(() => rej(new Error("history lookup timed out")), 5000))
-				]);
-				for (const m of (conv && conv.messages) || []) {
-					const mid = str(m && (m.id || m.itemId));
-					if (!mid) continue;
-					const sid = m.senderId || m.userId || (m.sender && m.sender.id);
-					if (sid) rememberMeta(mid, sid, m.text || "");
+	function refFromMessage(m) {
+		if (!m) return null;
+		if (m.replyTo && m.replyTo.id) return { id: str(m.replyTo.id), sender: m.replyTo.senderId ? str(m.replyTo.senderId) : pickSender(m.raw && (m.raw.replied_to_message || m.raw.reply_to_message)), text: m.replyTo.text || "", source: "payload" };
+		const d = deepReplyRef(m.raw);
+		return d ? Object.assign(d, { source: "raw" }) : null;
+	}
+
+	const prefix = (config && config.prefix) || "-";
+	const looksLikeCommand = text => typeof text === "string" && text.trim().startsWith(prefix);
+
+	/** Read the recent thread history once: learns senders and finds the reply info of one message. */
+	async function readHistory(threadId, wantId) {
+		const conv = await Promise.race([
+			client.getConversation(str(threadId)),
+			new Promise((_, rej) => setTimeout(() => rej(new Error("history lookup timed out")), 5000))
+		]);
+		let found = null;
+		for (const m of (conv && conv.messages) || []) {
+			const mid = str(m && (m.id || m.itemId));
+			if (!mid) continue;
+			const sid = m.senderId || m.userId || (m.sender && m.sender.id);
+			if (sid) rememberMeta(mid, sid, m.text || "");
+			if (wantId && mid === str(wantId)) found = m;
+		}
+		return found;
+	}
+
+	/**
+	 * Find what a message replies to. The realtime poll often delivers items WITHOUT the reply
+	 * reference, so for command-looking messages we re-read the thread (one request) to get it.
+	 */
+	let lastPlainLookup = 0;
+	async function findReply(msg) {
+		let ref = refFromMessage(msg);
+		// A plain "swipe-reply" to the bot (no prefix, e.g. answering Shihab) also needs its reply info:
+		// look it up when the bot spoke in this thread in the last 10 minutes (one request, max one per 1.5s).
+		const botSpokeRecently = Date.now() - (lastBotSendAt.get(str(msg.threadId)) || 0) < 10 * 60 * 1000;
+		const plainLookup = !ref && !msg.isSelf && !looksLikeCommand(msg.text) && botSpokeRecently && !!(msg.text && String(msg.text).trim()) && Date.now() - lastPlainLookup > 1500;
+		if (plainLookup) lastPlainLookup = Date.now();
+		if (!ref && !msg.isSelf && (looksLikeCommand(msg.text) || plainLookup)) {
+			for (let attempt = 0; attempt < (plainLookup ? 1 : 2) && !ref; attempt++) {
+				try {
+					if (attempt) await sleep(900);
+					ref = refFromMessage(await readHistory(msg.threadId, msg.id));
+					if (ref) ref.source = "history";
 				}
+				catch (_) { break; }
+			}
+		}
+		return ref;
+	}
+
+	async function resolveReplySender(msg, ref) {
+		const rid = str(ref.id);
+		let sender = ref.sender || "";
+		let text = ref.text || "";
+		let source = ref.source || "payload";
+		const meta = metaOf.get(rid);
+		if (!sender && meta && meta.senderId) { sender = meta.senderId; source += "+cache"; }
+		if (!text && meta && meta.text) text = meta.text;
+		if (!sender) {
+			try {
+				await readHistory(msg.threadId, null);
 				const found = metaOf.get(rid);
-				if (found) { if (!sender && found.senderId) sender = found.senderId; if (!text && found.text) text = found.text; }
+				if (found) { if (found.senderId) { sender = found.senderId; source += "+history"; } if (!text && found.text) text = found.text; }
 			}
 			catch (_) { /* keep what we have */ }
 		}
-		return { sender: sender || "", text };
+		return { id: rid, sender: sender || "", text, source: sender ? source : source + " (sender unknown)" };
 	}
 
 	function messageEvent(msg, replied) {
@@ -545,11 +608,12 @@ async function login(params) {
 			isSelf: Boolean(msg.isSelf),
 			messageType: msg.type
 		};
-		if (msg.replyTo && msg.replyTo.id) {
+		event.replySource = replied ? replied.source : "none";
+		if (replied && replied.id) {
 			event.repliedToMessage = {
-				messageID: str(msg.replyTo.id),
-				senderID: replied ? replied.sender : str(msg.replyTo.senderId),
-				body: replied ? replied.text : (msg.replyTo.text || ""),
+				messageID: replied.id,
+				senderID: replied.sender,
+				body: replied.text,
 				attachments: [],
 				timestamp: null
 			};
@@ -576,7 +640,11 @@ async function login(params) {
 			if (!selfListen || sentByBot.has(str(msg.id))) return;
 		}
 		let replied = null;
-		if (msg.replyTo && msg.replyTo.id) replied = await resolveReplySender(msg);
+		try {
+			const ref = await findReply(msg);
+			if (ref) replied = await resolveReplySender(msg, ref);
+		}
+		catch (e) { log.warn("REPLY", `could not resolve reply: ${e.message}`); }
 		emitToListeners(null, messageEvent(msg, replied));
 	});
 

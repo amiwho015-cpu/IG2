@@ -175,13 +175,16 @@ function normalizeCookies(list) {
  * Accepts: JSON array, JSON object, cookie header string, Netscape file.
  */
 function loadAccount() {
-	if (!fs.existsSync(accountPathFor()))
+	// Render/hosted deployments may supply Netscape cookie-file contents via
+	// IG_COOKIES; local development can keep using account.txt.
+	const envCookies = process.env.IG_COOKIES;
+	if (!envCookies && !fs.existsSync(accountPathFor()))
 		throw new Error(
-			"account.txt not found. Copy account.example.txt to account.txt and paste your Instagram cookies. " +
-			"It is git-ignored, so your cookies are never committed."
+			"account.txt not found. Add cookies to account.txt or set IG_COOKIES in the hosting environment. " +
+			"sessionid and ds_user_id are required."
 		);
-	const text = fs.readFileSync(accountPathFor(), "utf8").trim();
-	if (!text) throw new Error("account.txt is empty");
+	const text = String(envCookies || fs.readFileSync(accountPathFor(), "utf8")).trim();
+	if (!text) throw new Error("Instagram cookies are empty (account.txt / IG_COOKIES)");
 
 	let cookies = [];
 

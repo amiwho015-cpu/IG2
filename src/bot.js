@@ -17,6 +17,7 @@ const { createRegistry, loadAll } = require("./commandLoader");
 const { createDispatcher } = require("./dispatcher");
 const { createOnlineStatus } = require("./onlineStatus");
 const ica = require("../Tanvir143/ica");
+const igAdapter = require("./igAdapter");
 
 function firstArray(...candidates) {
   for (const value of candidates) {
@@ -482,7 +483,15 @@ function createBot(config) {
       log.info("LOGIN", "Connecting through the installed ICA package");
 
       try {
-        ica.login({ appState }, buildOptions(), finish);
+        // Local ICA mode uses the vendored Instagram Chat API with cookies
+        // from account.txt; it does not require the hosted ICA server.
+        if (config.server && config.server.mode === "instachat") {
+          Promise.resolve(
+            igAdapter.login({ cookies: appState, config })
+          ).then(api => finish(null, api), reject);
+        } else {
+          ica.login({ appState }, buildOptions(), finish);
+        }
       } catch (error) {
         reject(error);
       }

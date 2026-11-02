@@ -91,5 +91,9 @@
     "dir": "data",
     "autoRefreshThreadInfo": true,
     "notes": "MongoDB Atlas storage for users and threads."
+  },
+  "server": {
+    "mode": "instachat",
+    "notes": "Uses vendored local lib/instachat-api directly. No hosted ICA server URL or API key required."
   }
 }
