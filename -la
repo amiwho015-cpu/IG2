@@ -1,0 +1,41 @@
+[33m> b17830e[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Add optional MQTT deps
+[33m> e5a1e1b[m Add optional MQTT push trigger (IG_MQTT=1)
+[33m> 27b40e2[m Replace IG2 with updated ICA login and sing commands
+[33m> dab8cd9[m Replace with updated IG-ROBOT ICA sing1 sing2
+[33m< 4915a1f[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Replace old project with updated IG2
+[33m< 49f0e83[m instachat build 5: no self lookup, member-list fallback, throttled name refresh
+[33m< b7a7f9f[m instachat build 4: -diag, reply sender fix, fail-fast lookups
+[33m< 2994849[m Switch to vendored instachat-api, force instachat mode, 30 MB media limit
+[33m< 15fa412[m ytb: rewrite with yt-search + sing downloader, add video download
+[33m< 90a7ded[m ytb: use yt-search + sing downloader; 30 MB media limit
+[33m< 66f6cd1[m Delete commands/baby.js
+[33m< b67eade[m Add files via upload
+[33m< e619399[m Add files via upload
+[33m< fa6b967[m Add files via upload
+[33m< c3ae1c2[m Add files via upload
+[33m< e4b6095[m Add files via upload
+[33m< 15ea71f[m Add files via upload
+[33m< 8a2e843[m Add files via upload
+[33m< 846b63b[m Add files via upload
+[33m< d5431be[m Add files via upload
+[33m< 26d2b35[m Add files via upload
+[33m< c54e24f[m Delete commands/bot.js
+[33m< 7060fc6[m Add files via upload
+[33m< 14f1ede[m Add files via upload
+[33m< 6f5bd92[m Add files via upload
+[33m< 0db2091[m Add files via upload
+[33m< 9868f87[m Add files via upload
+[33m< e1e9d7a[m Add files via upload
+[33m< 7b1cd67[m Add files via upload
+[33m< c7eabcd[m fix kiss/hug/propose gender positions
+[33m< c160d4d[m pair + unsend fix
+[33m< f265dfd[m unsend + typing fix
+[33m< a49d1ac[m Direct mode + media shim fix
+[33m< 7fb3aeb[m Switch to direct mode (local ig-chat-api)
+[33m< 2e937b3[m Update info command
+[33m< a8e671c[m Add info command
+[33m< 8f1107d[m Fix autodl, spy, anisearch commands
+[33m< 3d8dcec[m Move files to repo root
+[33m< 09b48d5[m Extract group commands
+[33m< 8481f7a[m Add Insta-Bot group commands zip
+[33m< 60212ab[m Add Insta-Bot group commands zip
