@@ -1,0 +1,70 @@
+{
+  "_projectHeader": {
+    "File Name": "package.json",
+    "ICA": "igbot-api",
+    "Auhor": "Tanvir Ahmed (Tanvir143)",
+    "GitHub": "www.github.com/143tanvir",
+    "WhatsApp": "+8801750079773",
+    "Note": "Project metadata only; original source credits and license notices are retained."
+  },
+  "name": "igbot-api",
+  "version": "0.1.0",
+  "description": "Compatibility-oriented Instagram Direct client for bot frameworks, backed by a hosted ICA server.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/compat-smoke.js",
+    "test:compat": "node test/compat-smoke.js"
+  },
+  "keywords": [
+    "instagram",
+    "instagram-api",
+    "instagram-chat-api",
+    "instagram-bot",
+    "instagram-dm",
+    "instagram-messaging",
+    "instagram-automation",
+    "ig",
+    "ig-chat",
+    "ig-chat-api",
+    "ig-bot",
+    "ica",
+    "direct-message",
+    "dm",
+    "messaging",
+    "chat-api",
+    "realtime",
+    "websocket",
+    "json-rpc",
+    "client",
+    "bot",
+    "automation",
+    "nodejs"
+  ],
+  "author": "Neoaz (https://github.com/lazyneoaz)",
+  "license": "MIT",
+  "homepage": "https://github.com/lazyneoaz",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lazyneoaz/ig-chat-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lazyneoaz/ig-chat-api/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

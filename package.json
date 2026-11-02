@@ -1,0 +1,65 @@
+{
+  "_projectHeader": {
+    "File Name": "package.json",
+    "ICA": "igbot-api",
+    "Auhor": "Tanvir Ahmed (Tanvir143)",
+    "GitHub": "www.github.com/143tanvir",
+    "WhatsApp": "+8801750079773",
+    "Note": "Project metadata only; original source credits and license notices are retained."
+  },
+  "name": "Tanvir143_igBot",
+  "version": "2.0.0",
+  "description": "A modular Instagram Direct chat bot powered by the local igbot-api package.",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test/run.js",
+    "test:live": "node test/live-send.js"
+  },
+  "dependencies": {
+    "os": "0.1.2",
+    "ws": "8.22.0",
+    "jimp": "1.6.1",
+    "mongodb": "7.7.0",
+    "dotenv": "18.0.7",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@fontsource/roboto": "5.3.0",
+    "@hiudyy/ytdl": "0.2.6",
+    "@media-downloaders/v2": "2.1.1",
+    "@pontalabs/ytdl": "1.0.0",
+    "axios": "^1.7.9",
+    "fluent-ffmpeg": "^2.1.3",
+    "fontkit": "2.0.4",
+    "fs-extra": "^11.3.0",
+    "igbot-api": "file:./Tanvir143/igbot-api",
+    "path": "^0.12.7",
+    "sharp": "0.35.4",
+    "youtubei.js": "18.1.0",
+    "yt-search": "2.13.1"
+  },
+  "author": "Saifullah Al Neoaz",
+  "contributors": [
+    "Saifullah Al Neoaz (https://github.com/lazyneoaz)"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lazyneoaz/Insta-Bot.git"
+  },
+  "keywords": [
+    "instagram",
+    "instagram-bot",
+    "instagram-chat-bot",
+    "instagram-direct",
+    "ig-chat-api",
+    "chatbot"
+  ],
+  "homepage": "https://github.com/lazyneoaz/Insta-Bot#readme",
+  "bugs": {
+    "url": "https://github.com/lazyneoaz/Insta-Bot/issues"
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "_projectHeader": {
+    "File Name": "config.json",
+    "ICA": "igbot-api",
+    "Auhor": "Tanvir Ahmed (Tanvir143)",
+    "GitHub": "www.github.com/143tanvir",
+    "WhatsApp": "+8801750079773",
+    "Note": "Project metadata only; original source credits and license notices are retained."
+  },
+  "botName": "Tanvir143_igBot",
+  "prefix": ".",
+  "language": "en",
+  "adminBot": [
+    "62599140277",
+    "37722988100"
+  ],
+  "nickNameOnStart": "Tanvir143_igBot",
+  "env": {
+    "token": "",
+    "url": "",
+    "notes": "Optional custom-command API credentials. Set INSTABOT_TOKEN / INSTABOT_URL as environment variables when needed."
+  },
+  "account": {
+    "proxy": null,
+    "userAgent": null,
+    "notes": "Instagram login is cookie-only. Put your Instagram cookies in account.txt. sessionid and ds_user_id are required."
+  },
+  "music": {
+    "enable": true,
+    "apiUrl": "",
+    "apiToken": "",
+    "notes": "Song search for the sing command."
+  },
+  "antiInbox": false,
+  "noPrefix": false,
+  "welcome": {
+    "enable": true,
+    "message": "%1 Welcome to %2! Group.🎀",
+    "threadIDs": [],
+    "selfMessage": "Thanks for adding me to %2 group.\n Type {prefix}help to see all available commands.",
+    "notes": "Greet members added to a group thread."
+  },
+  "leave": {
+    "enable": true,
+    "message": "%1 He/She is no more this group.. ",
+    "threadIDs": [],
+    "notes": "Announce members who leave or are removed from a group thread."
+  },
+  "adminOnly": {
+    "enable": false,
+    "ignoreCommands": []
+  },
+  "whiteList": {
+    "enable": false,
+    "userIDs": [],
+    "threadIDs": []
+  },
+  "hideNotiMessage": {
+    "commandNotFound": false,
+    "adminOnly": false,
+    "userBanned": false,
+    "needRoleToUseCommand": false
+  },
+  "cooldown": {
+    "default": 1
+  },
+  "selfListen": false,
+  "listenEvents": true,
+  "autoMarkRead": false,
+  "autoMarkDelivery": true,
+  "autoReconnect": true,
+  "restartListenInterval": 0,
+  "logEvents": {
+    "disableAll": false,
+    "message": true,
+    "message_reply": true,
+    "message_reaction": true,
+    "message_unsend": true,
+    "read_receipt": false,
+    "typ": false
+  },
+  "onlineStatus": {
+    "enable": true,
+    "file": "data/online-status.jsonl",
+    "interval": 60000,
+    "notes": "Records bot online status, uptime and basic stats."
+  },
+  "database": {
+    "provider": "mongodb",
+    "name": "igbot",
+    "dir": "data",
+    "autoRefreshThreadInfo": true,
+    "notes": "MongoDB Atlas storage for users and threads."
+  }
+}

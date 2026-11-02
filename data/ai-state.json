@@ -1,0 +1,33 @@
+{
+  "_projectHeader": {
+    "File Name": "ai-state.json",
+    "ICA": "igbot-api",
+    "Auhor": "Tanvir Ahmed (Tanvir143)",
+    "GitHub": "www.github.com/143tanvir",
+    "WhatsApp": "+8801750079773",
+    "Note": "Project metadata only; original source credits and license notices are retained."
+  },
+  "t:2": {
+    "history": [
+      {
+        "role": "user",
+        "content": "hello",
+        "at": 1789390470003
+      },
+      {
+        "role": "assistant",
+        "content": "Hey there!",
+        "at": 1789390471365
+      }
+    ],
+    "lastActive": 1789390470003,
+    "lastBotMessageID": "bot1",
+    "lastBotAt": 1789390471365
+  },
+  "t:3": {
+    "history": [],
+    "lastActive": 1789390471366,
+    "lastBotMessageID": null,
+    "lastBotAt": 0
+  }
+}
