@@ -20,6 +20,10 @@
     "test": "node test/run.js",
     "test:live": "node test/live-send.js"
   },
+  "optionalDependencies": {
+    "instagram-private-api": "^1.46.1",
+    "instagram_mqtt": "^1.2.3"
+  },
   "dependencies": {
     "os": "0.1.2",
     "ws": "8.22.0",
