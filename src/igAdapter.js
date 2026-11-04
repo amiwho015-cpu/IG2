@@ -658,8 +658,18 @@ async function login(params) {
 		}
 	};
 
+	const liveThreads = new Set();
+	const BOOT_AT = Date.now();
 	client.on(Events.MESSAGE, async msg => {
 		if (!msg) return;
+		// Never act on chat history: the first message we see in a thread (e.g. right after being added
+		// to a group chat) must be fresh, and nothing from before the bot started is processed.
+		const tid = str(msg.threadId);
+		if (!liveThreads.has(tid)) {
+			const ts = Number(msg.timestamp) || 0;
+			if (ts && (ts < BOOT_AT - 3000 || ts < Date.now() - 15000)) { remember(msg.id, msg.threadId); return; }
+			liveThreads.add(tid);
+		}
 		remember(msg.id, msg.threadId);
 		rememberMeta(msg.id, msg.isSelf ? client.userId : msg.senderId, msg.text || "");
 		if (msg.isSelf) {
