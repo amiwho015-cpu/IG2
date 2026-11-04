@@ -57,29 +57,47 @@ async function getApiList() {
   return API_LIST;
 }
 
-// Try all APIs in order; return first successful response
-async function tryAllApis(buildPath) {
-  const apis = await getApiList();
+// Ask every mirror at the same time and return the first good answer (with an overall deadline),
+// so one dead mirror can no longer stall the command for minutes.
+async function tryAllApis(buildPath, totalMs = 45000) {
+  const apis = (await getApiList()).slice(0, 6);
   if (!apis.length) throw new Error("No APIs available (could not load API list)");
 
-  let lastErr = null;
+  return new Promise((resolve, reject) => {
+    let done = false, failed = 0, lastErr = null;
+    const ctl = new AbortController();
+    const finishFail = () => { if (done) return; done = true; clearTimeout(timer); reject(lastErr || new Error("All APIs failed")); };
+    const timer = setTimeout(() => { lastErr = lastErr || new Error("APIs timed out"); try { ctl.abort(); } catch (e) {} finishFail(); }, totalMs);
 
-  for (const base of apis) {
-    const url = `${base}${buildPath}`;
-    try {
+    for (const base of apis) {
+      const url = `${base}${buildPath}`;
       console.log("📥 Trying API:", url);
-      const { data } = await axios.get(url, { timeout: 25000 });
-      if (data && data.success !== false) {
-        console.log("✅ Success from:", base);
-        return { data, base };
-      }
-      console.log("⚠️ API returned unsuccessful:", base);
-    } catch (e) {
-      console.log("❌ API failed:", base, "-", e.message);
-      lastErr = e;
+      axios.get(url, { timeout: 25000, signal: ctl.signal }).then(({ data }) => {
+        if (done) return;
+        if (data && data.success !== false) {
+          done = true; clearTimeout(timer);
+          console.log("✅ Success from:", base);
+          try { ctl.abort(); } catch (e) {}
+          resolve({ data, base });
+        } else {
+          console.log("⚠️ API returned unsuccessful:", base);
+          lastErr = new Error("API returned unsuccessful: " + base);
+          if (++failed >= apis.length) finishFail();
+        }
+      }).catch(e => {
+        if (done) return;
+        console.log("❌ API failed:", base, "-", e.message);
+        lastErr = e;
+        if (++failed >= apis.length) finishFail();
+      });
     }
-  }
-  throw lastErr || new Error("All APIs failed");
+  });
+}
+
+function withDeadline(promise, ms, label) {
+  let t;
+  const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
 // -------------------- TEXT HELPERS --------------------
@@ -489,11 +507,13 @@ async function toshiroYoutube(url, type) {
     ? ["yta2", "yt-audio", "alldl", "alldlv2"]
     : ["alldl", "alldlv2"];
   let lastErr = new Error("no download link");
+  const deadline = Date.now() + 60000;
   for (const ep of endpoints) {
     for (const link of links) {
+      if (Date.now() > deadline) throw lastErr;
       try {
         const res = await axios.get(`${TOSHIRO_DL}/${ep}?url=${encodeURIComponent(link)}`,
-          { timeout: 60000, validateStatus: () => true });
+          { timeout: 20000, validateStatus: () => true });
         if (res.status >= 400) { lastErr = new Error(`${ep}: HTTP ${res.status}`); continue; }
         const found = findDownloadLink(res.data);
         if (found) {
@@ -510,74 +530,80 @@ async function toshiroYoutube(url, type) {
 // -------------------- DOWNLOAD HANDLER --------------------
 
 async function handleDownload(url, type, message, waitMsgID, metadata = null, videoQuality = 720) {
+  let stage = "finding download link";
   try {
-    const quality = type === "audio" ? 128 : videoQuality;
-    const apiType = type === "audio" ? "mp3" : "mp4";
+    await withDeadline((async () => {
+      const quality = type === "audio" ? 128 : videoQuality;
+      const apiType = type === "audio" ? "mp3" : "mp4";
 
-    const buildPath = `/api/yt?url=${encodeURIComponent(url)}&type=${apiType}&quality=${quality}`;
+      const buildPath = `/api/yt?url=${encodeURIComponent(url)}&type=${apiType}&quality=${quality}`;
 
-    let downloadUrl = null, base = null, data = null;
-    try {
-      const got = await tryAllApis(buildPath);
-      data = got.data; base = got.base;
-      if (data && data.success === true && data.download && data.download.downloadUrl)
-        downloadUrl = data.download.downloadUrl;
-    } catch (e) {
-      console.log("Main API list failed, using toshiro backup:", e.message);
-    }
+      let downloadUrl = null, base = null, data = null;
+      try {
+        const got = await tryAllApis(buildPath);
+        data = got.data; base = got.base;
+        if (data && data.success === true && data.download && data.download.downloadUrl)
+          downloadUrl = data.download.downloadUrl;
+      } catch (e) {
+        console.log("Main API list failed, using toshiro backup:", e.message);
+      }
 
-    // Backup: toshiro downloader (same host autodl uses) when the list is down / empty.
-    if (!downloadUrl) {
-      const backup = await toshiroYoutube(url, type);
-      downloadUrl = backup.downloadUrl;
-      base = backup.base;
+      // Backup: toshiro downloader (same host autodl uses) when the list is down / empty.
+      if (!downloadUrl) {
+        stage = "backup downloader";
+        const backup = await toshiroYoutube(url, type);
+        downloadUrl = backup.downloadUrl;
+        base = backup.base;
+        if (!metadata) {
+          const i = backup.info || {};
+          metadata = {
+            title: i.title || i.name || "YouTube Media",
+            duration: i.duration || i.timestamp || "N/A",
+            channel: i.authorName || i.author || i.channel || "N/A",
+            views: i.views || "0",
+            thumbnail: i.thumbnail || i.image || ""
+          };
+        }
+      }
+
       if (!metadata) {
-        const i = backup.info || {};
+        const m = (data && data.metadata) || {};
         metadata = {
-          title: i.title || i.name || "YouTube Media",
-          duration: i.duration || i.timestamp || "N/A",
-          channel: i.authorName || i.author || i.channel || "N/A",
-          views: i.views || "0",
-          thumbnail: i.thumbnail || i.image || ""
+          title: m.title || "YouTube Media",
+          duration: m.timestamp || "N/A",
+          channel: m.author?.name || "N/A",
+          views: m.views || "0",
+          thumbnail: m.thumbnail || m.image || ""
         };
       }
-    }
 
-    if (!metadata) {
-      const m = (data && data.metadata) || {};
-      metadata = {
-        title: m.title || "YouTube Media",
-        duration: m.timestamp || "N/A",
-        channel: m.author?.name || "N/A",
-        views: m.views || "0",
-        thumbnail: m.thumbnail || m.image || ""
-      };
-    }
-
-    await downloadAndSendFile(downloadUrl, metadata, type, message, waitMsgID, base);
+      stage = "downloading file";
+      await downloadAndSendFile(downloadUrl, metadata, type, message, waitMsgID, base, s => { stage = s; });
+    })(), 6 * 60 * 1000, "ytb");
 
   } catch (err) {
-    console.error("Download failed:", err.message);
+    console.error(`[ytb] failed while ${stage}:`, err && err.message);
     try { await message.unsend(waitMsgID); } catch (e) {}
-    message.reply(`❌ Download failed: ${err.message}`);
+    try { await message.reply(`❌ Download failed (${stage}): ${err && err.message}`); }
+    catch (e) { console.error("[ytb] could not even send the error message:", e && e.message); }
   }
 }
 
-async function downloadAndSendFile(downloadUrl, metadata, type, message, waitMsgID, apiSource) {
+async function downloadAndSendFile(downloadUrl, metadata, type, message, waitMsgID, apiSource, setStage = () => {}) {
+  const fileExtension = type === "audio" ? "mp3" : "mp4";
+  const fileName = `${Date.now()}.${fileExtension}`;
+  const filePath = path.join(__dirname, "cache", fileName);
+  fs.ensureDirSync(path.join(__dirname, "cache"));
+
   try {
-    const fileExtension = type === "audio" ? "mp3" : "mp4";
-    const fileName = `${Date.now()}.${fileExtension}`;
-    const filePath = path.join(__dirname, "cache", fileName);
-
-    fs.ensureDirSync(path.join(__dirname, "cache"));
-
     console.log("Downloading from:", downloadUrl);
 
     const res = await axios({
       method: 'GET',
       url: downloadUrl,
       responseType: 'stream',
-      timeout: 60000,
+      timeout: 30000,
+      maxRedirects: 5,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': '*/*',
@@ -585,24 +611,38 @@ async function downloadAndSendFile(downloadUrl, metadata, type, message, waitMsg
     });
 
     const writer = fs.createWriteStream(filePath);
-    res.data.pipe(writer);
+    let last = Date.now();
+    const t0 = Date.now();
+    res.data.on("data", () => { last = Date.now(); });
+    // Kill the download if nothing arrives for 30s, or it runs past 4 minutes.
+    const watchdog = setInterval(() => {
+      if (Date.now() - last > 30000 || Date.now() - t0 > 240000) {
+        res.data.destroy(new Error("download stalled / too slow"));
+      }
+    }, 3000);
 
-    await new Promise((resolve, reject) => {
-      writer.on("finish", resolve);
-      writer.on("error", reject);
-    });
+    try {
+      res.data.pipe(writer);
+      await new Promise((resolve, reject) => {
+        writer.on("finish", resolve);
+        writer.on("error", reject);
+        res.data.on("error", reject);
+        res.data.on("aborted", () => reject(new Error("download aborted")));
+      });
+    } finally {
+      clearInterval(watchdog);
+    }
+
+    const bytes = fs.statSync(filePath).size;
+    if (!bytes) throw new Error("downloaded file is empty");
+    console.log(`[ytb] downloaded ${(bytes / 1048576).toFixed(2)} MB in ${Date.now() - t0}ms`);
 
     try { await message.unsend(waitMsgID); } catch (e) {}
 
-    const fileSize = (fs.statSync(filePath).size / (1024 * 1024)).toFixed(2);
-
+    setStage("sending file to Instagram");
     // Only the audio/video itself is sent, no info text.
     await message.reply({ attachment: fs.createReadStream(filePath) });
-
-    fs.unlinkSync(filePath);
-
-  } catch (err) {
-    console.error("Download and send error:", err.message);
-    throw err;
+  } finally {
+    try { fs.unlinkSync(filePath); } catch (e) {}
   }
 }
