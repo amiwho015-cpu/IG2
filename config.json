@@ -1,0 +1,127 @@
+{
+  "botName": "InstaBOT",
+  "prefix": "-",
+  "language": "en",
+  "adminBot": [
+    "76593286314"
+  ],
+  "nickNameOnStart": "InstaBOT",
+  "env": {
+    "token": "chat.api.toke.neokex.ica.token.can.change.a9y.2ime.ok",
+    "url": "https://nkx-ica.neokex.xyz",
+    "notes": "Optional secrets/endpoints for custom commands. Read from the environment when left blank (INSTABOT_TOKEN / INSTABOT_URL). Use them for a custom music server or any external API your commands call."
+  },
+  "server": {
+    "url": "https://nkx-ica.neokex.xyz",
+    "token": "chat.api.toke.neokex.ica.token.can.change.a9y.2ime.ok",
+    "timeout": 60000,
+    "mode": "instachat",
+    "notes": "Default mode \"instachat\" uses the built-in lib/instachat-api (cookies only: IG_COOKIES env or account.txt). The old hosted ICA server is dead. \"direct\" needs the private @lazyneoaz/ig-chat-api package; \"server\" needs url+token of your own ig-chat-api-server. IG_MODE overrides this."
+  },
+  "account": {
+    "proxy": null,
+    "userAgent": null,
+    "notes": "Instagram login is cookie-only. Put your Instagram cookies in account.txt: a Netscape cookie file (Cookie-Editor export), a `sessionid=...; ds_user_id=...; csrftoken=...` string, or a JSON array of cookie objects. `sessionid` and `ds_user_id` are required. `proxy` is an optional HTTP(S) proxy URL and `userAgent` overrides the default Instagram Android user agent."
+  },
+  "music": {
+    "enable": true,
+    "apiUrl": "",
+    "apiToken": "",
+    "notes": "Song search for the sing command. Leave apiUrl/apiToken blank to search Instagram's own music catalogue. Point them at your music server to search there instead; {query} is replaced with the song text."
+  },
+  "antiInbox": false,
+  "noPrefix": false,
+  "welcome": {
+    "enable": true,
+    "message": "𝐻𝑒𝑦 %1 𝑤𝑒𝑙𝑐𝑜𝑚𝑒 𝑡𝑜 𝑜𝑢𝑟...\n『 %2 』🤍\n𝑇𝑟𝑦 𝑡𝑜 𝑏𝑒 𝑓𝑟𝑖𝑒𝑛𝑑𝑙𝑦...\n𝐴𝑙𝑤𝑎𝑦𝑠 𝑚𝑎𝑖𝑛𝑡𝑎𝑖𝑛 𝑔𝑜𝑜𝑑 𝑏𝑒ℎ𝑎𝑣𝑖𝑜𝑟...\n𝑅𝑒𝑠𝑝𝑒𝑐𝑡 𝑒𝑣𝑒𝑟𝑦 𝑚𝑒𝑚𝑏𝑒𝑟...\n\n𝑊𝑒 ℎ𝑜𝑝𝑒 𝑦𝑜𝑢 𝑤𝑖𝑙𝑙 𝑠𝑡𝑎𝑦 𝑤𝑖𝑡ℎ 𝑢𝑠...\n𝐴𝑠 𝑜𝑢𝑟 𝑡𝑟𝑢𝑠𝑡𝑒𝑑 𝑚𝑒𝑚𝑏𝑒𝑟. 𝑇ℎ𝑎𝑛𝑘 𝑦𝑜𝑢...🖤\n𝐴𝑛𝑑 𝑦𝑜𝑢𝑟 𝑖𝑛𝑡𝑟𝑜…? 🌸🕊️",
+    "threadIDs": [],
+    "selfMessage": "Thanks for inviting me to %2 💋. Type {prefix}help to see all available commands.",
+    "notes": "Greet members added to a group thread. %1 = the new member, %2 = the thread name. selfMessage is sent when the BOT itself is added ({prefix} = the live prefix, %2 = the group name). Leave threadIDs empty for every thread, or list the thread IDs to limit it. card: picture sent with the text (\"welcard\" or \"welcome\" = toshiro canvas API, false = text only). fallbackScan: also greet members found by watching the member list when Instagram sends no join event.",
+    "card": "welcard",
+    "cardOnly": true,
+    "fallbackScan": true
+  },
+  "leave": {
+    "enable": true,
+    "message": "%1 miss you bbz 💔",
+    "threadIDs": [],
+    "notes": "Announce members who leave or are removed from a group thread. %1 = the member, %2 = the thread name. Leave threadIDs empty for every thread."
+  },
+  "adminOnly": {
+    "enable": false,
+    "ignoreCommands": []
+  },
+  "whiteList": {
+    "enable": false,
+    "userIDs": [],
+    "threadIDs": []
+  },
+  "hideNotiMessage": {
+    "commandNotFound": false,
+    "adminOnly": false,
+    "userBanned": false,
+    "needRoleToUseCommand": false
+  },
+  "cooldown": {
+    "default": 1
+  },
+  "selfListen": true,
+  "listenEvents": true,
+  "autoMarkRead": false,
+  "autoMarkDelivery": true,
+  "autoReconnect": true,
+  "restartListenInterval": 3600000,
+  "logEvents": {
+    "disableAll": false,
+    "message": true,
+    "message_reply": true,
+    "message_reaction": true,
+    "message_unsend": true,
+    "read_receipt": false,
+    "typ": false
+  },
+  "onlineStatus": {
+    "enable": true,
+    "file": "data/online-status.jsonl",
+    "interval": 60000,
+    "notes": "Appends one JSON line per interval recording that the bot is online, together with uptime and basic stats."
+  },
+  "database": {
+    "dir": "data",
+    "autoRefreshThreadInfo": true,
+    "github": {
+      "token": "",
+      "repo": "",
+      "branch": "main",
+      "path": "bot-data",
+      "extraFiles": [
+        "commands/cache/autoreact.json"
+      ],
+      "notes": "Saves users/threads to a GitHub repo so data survives redeploys. Prefer env vars GITHUB_TOKEN and GITHUB_REPO (owner/repo) over writing the token here. Use a PRIVATE repo."
+    },
+    "notes": "Simple JSON storage for users and threads. Files are created automatically. With database.github set they are also mirrored to GitHub."
+  },
+  "optionsFca": {
+    "forceLogin": true,
+    "listenEvents": true,
+    "updatePresence": true,
+    "selfListenEvent": true,
+    "autoReconnect": true,
+    "minRequestInterval": 350,
+    "keepAliveInterval": 240000,
+    "tokenRefreshInterval": 600000,
+    "notes": "Extra options passed to ig-chat-api.login() in direct mode (same values as Insta-Bot3). minRequestInterval (ms) spaces API calls."
+  },
+  "instachat": {
+    "pollIntervalMs": 1000,
+    "idlePollIntervalMs": 1500,
+    "adaptivePolling": true,
+    "mqtt": true,
+    "mqttMode": "auto",
+    "throttle": {
+      "minGapMs": 250,
+      "perThreadGapMs": 400,
+      "jitterMs": 150
+    }
+  }
+}
