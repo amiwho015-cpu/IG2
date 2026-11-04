@@ -120,8 +120,8 @@ function loadConfig() {
 	// instachat-api (vendored in lib/instachat-api): polling + send throttle settings.
 	const ic = config.instachat && typeof config.instachat === "object" ? config.instachat : {};
 	config.instachat = ic;
-	if (!(Number(ic.pollIntervalMs) >= 1000)) ic.pollIntervalMs = 2500;
-	if (!(Number(ic.idlePollIntervalMs) >= 1000)) ic.idlePollIntervalMs = 8000;
+	if (!(Number(ic.pollIntervalMs) >= 300)) ic.pollIntervalMs = 2500;
+	if (!(Number(ic.idlePollIntervalMs) >= 300)) ic.idlePollIntervalMs = 8000;
 	if (ic.adaptivePolling == null) ic.adaptivePolling = true;
 	// Realtime push (MQTT over WebSocket): off unless enabled; mode ica|native|library|auto.
 	if (ic.mqtt == null) ic.mqtt = false;
