@@ -107,4 +107,4 @@ function build(n) {
 	};
 }
 
-module.exports = { build, STYLES };
+module.exports = { build, STYLES, uploadPublic };
