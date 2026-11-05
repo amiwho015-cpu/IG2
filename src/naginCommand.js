@@ -24,27 +24,34 @@ const STYLES = {
 };
 
 async function uploadPublic(buffer, ext) {
+	const e = ext || "jpg";
+	const mime = e === "png" ? "image/png" : e === "webp" ? "image/webp" : "image/jpeg";
+	const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 	const hosts = [
-		{ url: "https://litterbox.catbox.moe/resources/internals/api.php", extra: { reqtype: "fileupload", time: "1h" } },
-		{ url: "https://catbox.moe/user/api.php", extra: { reqtype: "fileupload" } }
+		{ name: "uguu.se", url: "https://uguu.se/upload", field: "files[]", extra: {}, parse: d => (d && d.files && d.files[0] && d.files[0].url) || "" },
+		{ name: "tmpfiles.org", url: "https://tmpfiles.org/api/v1/upload", field: "file", extra: {}, parse: d => { const u = d && d.data && d.data.url; return u ? String(u).replace("tmpfiles.org/", "tmpfiles.org/dl/").replace("http://", "https://") : ""; } },
+		{ name: "litterbox", url: "https://litterbox.catbox.moe/resources/internals/api.php", field: "fileToUpload", extra: { reqtype: "fileupload", time: "1h" }, parse: d => String(d || "").trim() },
+		{ name: "catbox", url: "https://catbox.moe/user/api.php", field: "fileToUpload", extra: { reqtype: "fileupload" }, parse: d => String(d || "").trim() },
+		{ name: "0x0.st", url: "https://0x0.st", field: "file", extra: {}, parse: d => String(d || "").trim() }
 	];
-	let last = "upload failed";
+	const errors = [];
 	for (const h of hosts) {
 		try {
 			const form = new FormData();
 			for (const [k, v] of Object.entries(h.extra)) form.append(k, v);
-			form.append("fileToUpload", buffer, { filename: `pfp.${ext || "jpg"}` });
+			form.append(h.field, buffer, { filename: `pfp.${e}`, contentType: mime });
 			const res = await axios.post(h.url, form, {
-				headers: { ...form.getHeaders(), "User-Agent": "Mozilla/5.0" },
+				headers: { ...form.getHeaders(), "User-Agent": UA },
 				timeout: 60000, maxBodyLength: Infinity, validateStatus: () => true
 			});
-			const out = String(res.data || "").trim();
+			const out = h.parse(res.data);
 			if (/^https:\/\//i.test(out)) return out;
-			last = `${h.url.split("/")[2]}: ${out.slice(0, 80) || "HTTP " + res.status}`;
+			errors.push(`${h.name}: ${String(typeof res.data === "string" ? res.data : JSON.stringify(res.data || "")).slice(0, 40) || "HTTP " + res.status}`);
 		}
-		catch (e) { last = `${h.url.split("/")[2]}: ${(e && e.message) || e}`; }
+		catch (err) { errors.push(`${h.name}: ${((err && err.message) || err).toString().slice(0, 40)}`); }
 	}
-	throw new Error(`could not upload the profile picture (${last})`);
+	console.error("[nagin] all upload hosts failed:", errors.join(" | "));
+	throw new Error(`could not upload the profile picture (${errors.join("; ")})`);
 }
 
 function build(n) {
@@ -107,4 +114,73 @@ function build(n) {
 	};
 }
 
-module.exports = { build, STYLES, uploadPublic };
+function buildAll() {
+	return {
+		config: {
+			name: "nagin12345",
+			aliases: ["naginall", "nagin12"],
+			version: "1.0",
+			author: "CRX Shihab",
+			countDown: 60,
+			role: 0,
+			description: { en: "Make all 5 Nagin styles at once (Midjourney)" },
+			category: "image",
+			guide: { en: "Reply to someone's message with {pn}\nOr: {pn} @user" }
+		},
+
+		onStart: async function ({ api, event, args, message }) {
+			const react = emoji => Promise.resolve(api.setMessageReaction(emoji, event.messageID)).catch(() => { });
+			const targetArgs = (event.messageReply || (args && args.length)) ? args : [String(event.senderID)];
+
+			let profile = null, target = null;
+			try {
+				target = await resolveUserTarget(targetArgs, event, api);
+				profile = await resolveProfile(targetArgs, event, api);
+			}
+			catch (_) { /* handled below */ }
+			if (!target || !target.id) return message.reply("❌ Kar nagin banabo? Kono message e reply diye likho, ba @user dao.");
+			const picture = profile && profile.profilePicture;
+			if (!picture) return message.reply("❌ Er profile picture pawa jachhe na (Instagram rate-limit ba private hote pare). Ektu pore try koro.");
+
+			await react("⏳");
+			const wait = await message.reply("🐍 5 ta Nagin (1-5) toiri hocche, ektu beshi somoy lagbe...").catch(() => null);
+			const clearWait = async () => { if (wait && wait.messageID) { try { await api.unsendMessage(wait.messageID); } catch (_) { /* gone */ } } };
+			const name = (profile && (profile.name || profile.username)) || target.id;
+			try {
+				const hd = await hdProfilePicture(String(profile.userID || target.id), [picture]).catch(() => null);
+				let buffer, ext;
+				if (hd && hd.buffer) { buffer = hd.buffer; ext = hd.ext; }
+				else {
+					const got = await axios.get(picture, { responseType: "arraybuffer", timeout: 30000, headers: { "User-Agent": "Mozilla/5.0" } });
+					buffer = Buffer.from(got.data); ext = "jpg";
+				}
+				const imageUrl = await uploadPublic(buffer, ext);
+				await clearWait();
+				let ok = 0;
+				await Promise.all([1, 2, 3, 4, 5].map(async n => {
+					try {
+						const images = await tz.fetchImages("/api/image/mj", `${imageUrl} ${STYLES[n].text} --iw 1.5`, { count: 1, random: false, timeout: 300000 });
+						await message.reply({
+							attachment: { buffer: images[0].buffer, fileName: `nagin${n}.${images[0].ext}` },
+							body: `🐍 ${name} - ${STYLES[n].title} (${n}/5)`, textFirst: true
+						});
+						ok++;
+					}
+					catch (e) {
+						console.error(`[nagin12345] style ${n} failed:`, (e && e.message) || e);
+						await message.reply(`❌ nagin${n} (${STYLES[n].title}) hoyni: ${((e && e.message) || "try again").toString().slice(0, 120)}`).catch(() => { });
+					}
+				}));
+				await react(ok ? "✅" : "❌");
+			}
+			catch (e) {
+				console.error("[nagin12345] failed:", (e && e.message) || e);
+				await clearWait();
+				await react("❌");
+				return message.reply(`❌ Nagin banano gelo na: ${((e && e.message) || "try again").toString().slice(0, 200)}`);
+			}
+		}
+	};
+}
+
+module.exports = { build, buildAll, STYLES, uploadPublic };

@@ -83,4 +83,67 @@ function build(n) {
 	};
 }
 
-module.exports = { build, STYLES };
+function buildAll() {
+	return {
+		config: {
+			name: "slap12345",
+			aliases: ["slapall", "slap12"],
+			version: "1.0",
+			author: "CRX Shihab",
+			countDown: 60,
+			role: 0,
+			description: { en: "Make all 5 slap styles at once (Midjourney)" },
+			category: "image",
+			guide: { en: "Reply to someone's message with {pn}\nOr: {pn} @user" }
+		},
+
+		onStart: async function ({ api, event, args, message }) {
+			const react = emoji => Promise.resolve(api.setMessageReaction(emoji, event.messageID)).catch(() => { });
+			let victim = null, victimProfile = null, meProfile = null;
+			try {
+				victim = await resolveUserTarget(args, event, api);
+				victimProfile = await resolveProfile(args, event, api);
+				meProfile = await resolveProfile([String(event.senderID)], Object.assign({}, event, { messageReply: null }), api);
+			}
+			catch (_) { /* handled below */ }
+			if (!victim || !victim.id) return message.reply("❌ Kake slap marbe? Kono message e reply diye likho, ba @user dao.");
+			if (String(victim.id) === String(event.senderID)) return message.reply("😅 Nijeke nijei slap? Onno kono manusher message e reply dao.");
+
+			await react("⏳");
+			const wait = await message.reply("👋 5 ta Slap (1-5) toiri hocche, ektu beshi somoy lagbe...").catch(() => null);
+			const clearWait = async () => { if (wait && wait.messageID) { try { await api.unsendMessage(wait.messageID); } catch (_) { /* gone */ } } };
+			try {
+				const [a, b] = await Promise.all([picBuffer(meProfile, event.senderID), picBuffer(victimProfile, victim.id)]);
+				if (!a || !b) throw new Error("ekjoner profile picture pawa jachhe na (private ba rate-limit hote pare)");
+				const [urlA, urlB] = await Promise.all([uploadPublic(a.buffer, a.ext), uploadPublic(b.buffer, b.ext)]);
+				await clearWait();
+				const nameA = (meProfile && (meProfile.name || meProfile.username)) || event.senderID;
+				const nameB = (victimProfile && (victimProfile.name || victimProfile.username)) || victim.id;
+				let ok = 0;
+				await Promise.all([1, 2, 3, 4, 5].map(async n => {
+					try {
+						const images = await tz.fetchImages("/api/image/mj", `${urlA} ${urlB} ${STYLES[n].text} --iw 1.5`, { count: 1, random: false, timeout: 300000 });
+						await message.reply({
+							attachment: { buffer: images[0].buffer, fileName: `slap${n}.${images[0].ext}` },
+							body: `👋 ${nameA} ➜ ${nameB} (${STYLES[n].title}, ${n}/5)`, textFirst: true
+						});
+						ok++;
+					}
+					catch (e) {
+						console.error(`[slap12345] style ${n} failed:`, (e && e.message) || e);
+						await message.reply(`❌ slap${n} (${STYLES[n].title}) hoyni: ${((e && e.message) || "try again").toString().slice(0, 120)}`).catch(() => { });
+					}
+				}));
+				await react(ok ? "✅" : "❌");
+			}
+			catch (e) {
+				console.error("[slap12345] failed:", (e && e.message) || e);
+				await clearWait();
+				await react("❌");
+				return message.reply(`❌ Slap picture banano gelo na: ${((e && e.message) || "try again").toString().slice(0, 200)}`);
+			}
+		}
+	};
+}
+
+module.exports = { build, buildAll, STYLES };
