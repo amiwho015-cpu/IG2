@@ -134,6 +134,14 @@ async function login(params) {
 		metaOf.set(key, { senderId: senderId ? str(senderId) : prev.senderId, text: text || prev.text || "" });
 		if (metaOf.size > 20000) metaOf.delete(metaOf.keys().next().value);
 	};
+	// messageID -> attachments: so a reply to a photo/video can hand the media to the command
+	// (Instagram's reply payload only carries the quoted message id, never its media).
+	const attsOf = new Map();
+	const rememberAtts = (messageID, list) => {
+		if (!messageID || !Array.isArray(list) || !list.length) return;
+		attsOf.set(str(messageID), list);
+		if (attsOf.size > 3000) attsOf.delete(attsOf.keys().next().value);
+	};
 	const sentByBot = new Set();
 	const rememberSent = (id, threadID) => {
 		if (!id) return;
@@ -646,7 +654,7 @@ async function login(params) {
 				messageID: replied.id,
 				senderID: replied.sender,
 				body: replied.text,
-				attachments: [],
+				attachments: Array.isArray(replied.attachments) ? replied.attachments : [],
 				timestamp: null
 			};
 		}
@@ -675,6 +683,7 @@ async function login(params) {
 		}
 		remember(msg.id, msg.threadId);
 		rememberMeta(msg.id, msg.isSelf ? client.userId : msg.senderId, msg.text || "");
+		rememberAtts(msg.id, mapAttachments(msg));
 		if (msg.isSelf) {
 			// Our own sends come back through polling; give send() a moment to register the id,
 			// then only deliver messages typed from another device (and only with selfListen).
@@ -687,6 +696,17 @@ async function login(params) {
 			if (ref) replied = await resolveReplySender(msg, ref);
 		}
 		catch (e) { log.warn("REPLY", `could not resolve reply: ${e.message}`); }
+		if (replied && replied.id) {
+			let atts = attsOf.get(str(replied.id));
+			if (!atts && looksLikeCommand(msg.text)) {
+				// not seen live (older than the bot's start): read it from the thread history
+				try {
+					const m = await readHistory(msg.threadId, replied.id);
+					if (m) { atts = mapAttachments(m); rememberAtts(replied.id, atts); }
+				} catch (_) { /* no media then */ }
+			}
+			replied.attachments = atts || [];
+		}
 		emitToListeners(null, messageEvent(msg, replied));
 	});
 
