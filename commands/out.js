@@ -1,6 +1,6 @@
 "use strict";
 
-const { errText } = require("../src/igActions");
+const { errText, leaveVerified } = require("../src/igActions");
 
 module.exports = {
 	config: {
@@ -32,7 +32,7 @@ module.exports = {
 		catch (_) { /* goodbye is optional, leaving is not */ }
 
 		try {
-			await api.leaveGroup(id);
+			await leaveVerified(api, id);
 			if (other) return message.reply(`✅ Left group ${id}.`);
 		}
 		catch (error) {

@@ -444,10 +444,13 @@ async function login(params) {
 
 	// ---------- group management ----------
 
+	// getThreadInfo is cached for 45s: drop the entry whenever membership changes (or the caller
+	// needs a fresh member list) so "is X in the group now?" never reads stale data.
+	api.invalidateThread = threadID => { try { threadCache.delete(str(threadID)); } catch (_) { /* ignore */ } };
 	const addUsers = (userID, threadID, ...rest) => bridge(
-		() => client.addParticipants(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)), findCb(...rest));
+		async () => { try { return await client.addParticipants(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)); } finally { api.invalidateThread(threadID); } }, findCb(...rest));
 	const removeUsers = (userID, threadID, ...rest) => bridge(
-		() => client.removeParticipant(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)), findCb(...rest));
+		async () => { try { return await client.removeParticipant(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)); } finally { api.invalidateThread(threadID); } }, findCb(...rest));
 
 	api.addUserToGroup = api.addUserToThread = addUsers;
 	api.removeUserFromGroup = api.removeUserFromThread = removeUsers;
@@ -465,7 +468,7 @@ async function login(params) {
 
 	api.follow = api.followUser = (userID, ...rest) => bridge(() => client.followUser(str(userID)), findCb(...rest));
 	api.unfollow = api.unfollowUser = (userID, ...rest) => bridge(() => client.unfollowUser(str(userID)), findCb(...rest));
-	api.leaveThread = api.leaveGroup = (threadID, ...rest) => bridge(() => client.leaveThread(str(threadID)), findCb(...rest));
+	api.leaveThread = api.leaveGroup = (threadID, ...rest) => bridge(async () => { try { return await client.leaveThread(str(threadID)); } finally { api.invalidateThread(threadID); } }, findCb(...rest));
 	api.deleteThread = (threadID, ...rest) => bridge(() => client.deleteThread(str(threadID)), findCb(...rest));
 
 	// Things the Instagram web API cannot do: fail clearly instead of silently.

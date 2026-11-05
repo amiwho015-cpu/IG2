@@ -578,8 +578,18 @@ async function handleDownload(url, type, message, waitMsgID, metadata = null, vi
       }
 
       stage = "downloading file";
-      await downloadAndSendFile(downloadUrl, metadata, type, message, waitMsgID, base, s => { stage = s; });
-    })(), 6 * 60 * 1000, "ytb");
+      try {
+        await downloadAndSendFile(downloadUrl, metadata, type, message, waitMsgID, base, s => { stage = s; });
+      } catch (e) {
+        // The first link kept failing while downloading: try the other (toshiro) source once.
+        if (stage !== "downloading file" || /^toshiro/.test(base || "")) throw e;
+        console.log("[ytb] first source failed while downloading, trying backup source:", e.message);
+        stage = "backup downloader";
+        const backup = await toshiroYoutube(url, type);
+        stage = "downloading file (backup)";
+        await downloadAndSendFile(backup.downloadUrl, metadata, type, message, waitMsgID, backup.base, s => { stage = s; });
+      }
+    })(), 20 * 60 * 1000, "ytb");
 
   } catch (err) {
     console.error(`[ytb] failed while ${stage}:`, err && err.message);
@@ -587,6 +597,69 @@ async function handleDownload(url, type, message, waitMsgID, metadata = null, vi
     try { await message.reply(`❌ Download failed (${stage}): ${err && err.message}`); }
     catch (e) { console.error("[ytb] could not even send the error message:", e && e.message); }
   }
+}
+
+// Download to disk. If the server drops the connection halfway ("aborted"), continue from
+// the bytes already saved (HTTP Range) instead of starting over; up to 6 tries.
+async function downloadToFile(downloadUrl, filePath) {
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+  const t0 = Date.now();
+  const HARD_LIMIT = 12 * 60 * 1000;
+  let received = 0, total = 0, lastErr = null;
+  try { fs.unlinkSync(filePath); } catch (e) {}
+
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    if (Date.now() - t0 > HARD_LIMIT) break;
+    try {
+      const headers = { 'User-Agent': UA, 'Accept': '*/*' };
+      if (received > 0) headers['Range'] = `bytes=${received}-`;
+      const res = await axios({
+        method: 'GET', url: downloadUrl, responseType: 'stream',
+        timeout: 30000, maxRedirects: 5, headers,
+        validateStatus: st => st >= 200 && st < 400
+      });
+
+      let append = false;
+      if (received > 0) {
+        if (res.status === 206) append = true;
+        else { received = 0; } // server ignored Range: start again from zero
+      }
+      const len = Number(res.headers["content-length"] || 0);
+      const cr = String(res.headers["content-range"] || "").match(/\/(\d+)$/);
+      total = cr ? Number(cr[1]) : (len ? len + (append ? received : 0) : 0);
+      console.log(`[ytb] download try ${attempt}: status ${res.status}, ${append ? "resuming at " + received : "from start"}, total ${total ? (total / 1048576).toFixed(1) + " MB" : "unknown"}`);
+
+      const writer = fs.createWriteStream(filePath, { flags: append ? "a" : "w" });
+      let last = Date.now(), ended = false;
+      res.data.on("data", () => { last = Date.now(); });
+      res.data.on("end", () => { ended = true; });
+      const watchdog = setInterval(() => {
+        if (Date.now() - last > 30000) res.data.destroy(new Error("download stalled"));
+        else if (Date.now() - t0 > HARD_LIMIT) res.data.destroy(new Error("download too slow"));
+      }, 3000);
+      try {
+        res.data.pipe(writer);
+        await new Promise((resolve, reject) => {
+          writer.on("finish", resolve);
+          writer.on("error", reject);
+          res.data.on("error", reject);
+          res.data.on("close", () => { if (!ended) reject(new Error("download aborted")); });
+        });
+      } finally { clearInterval(watchdog); }
+
+      received = fs.statSync(filePath).size;
+      if (total && received < total) throw new Error("download aborted");
+      if (!received) throw new Error("downloaded file is empty");
+      return received;
+    } catch (e) {
+      lastErr = e;
+      try { received = fs.statSync(filePath).size; } catch (x) { received = 0; }
+      if (total && received >= total) return received; // actually complete
+      console.log(`[ytb] download try ${attempt} failed (${e.message}); have ${(received / 1048576).toFixed(2)} MB`);
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  throw lastErr || new Error("download failed");
 }
 
 async function downloadAndSendFile(downloadUrl, metadata, type, message, waitMsgID, apiSource, setStage = () => {}) {
@@ -597,44 +670,8 @@ async function downloadAndSendFile(downloadUrl, metadata, type, message, waitMsg
 
   try {
     console.log("Downloading from:", downloadUrl);
-
-    const res = await axios({
-      method: 'GET',
-      url: downloadUrl,
-      responseType: 'stream',
-      timeout: 30000,
-      maxRedirects: 5,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': '*/*',
-      }
-    });
-
-    const writer = fs.createWriteStream(filePath);
-    let last = Date.now();
     const t0 = Date.now();
-    res.data.on("data", () => { last = Date.now(); });
-    // Kill the download if nothing arrives for 30s, or it runs past 4 minutes.
-    const watchdog = setInterval(() => {
-      if (Date.now() - last > 30000 || Date.now() - t0 > 240000) {
-        res.data.destroy(new Error("download stalled / too slow"));
-      }
-    }, 3000);
-
-    try {
-      res.data.pipe(writer);
-      await new Promise((resolve, reject) => {
-        writer.on("finish", resolve);
-        writer.on("error", reject);
-        res.data.on("error", reject);
-        res.data.on("aborted", () => reject(new Error("download aborted")));
-      });
-    } finally {
-      clearInterval(watchdog);
-    }
-
-    const bytes = fs.statSync(filePath).size;
-    if (!bytes) throw new Error("downloaded file is empty");
+    const bytes = await downloadToFile(downloadUrl, filePath);
     console.log(`[ytb] downloaded ${(bytes / 1048576).toFixed(2)} MB in ${Date.now() - t0}ms`);
 
     try { await message.unsend(waitMsgID); } catch (e) {}

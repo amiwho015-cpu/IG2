@@ -103,6 +103,7 @@ function leaveGroup(api, tid) {
 /** Participant ids of a thread; [] when Instagram will not say. */
 async function participants(api, tid) {
 	try {
+		if (typeof api.invalidateThread === "function") api.invalidateThread(tid); // never read the 45s cache here
 		const info = await invoke(api, "getThreadInfo", [String(tid)]);
 		return ((info && (info.participantIDs || info.userIDs)) || []).map(String);
 	}
@@ -118,16 +119,42 @@ async function participants(api, tid) {
 async function joinUser(api, uid, tid) {
 	uid = String(uid);
 	if ((await participants(api, tid)).includes(uid)) return { already: true };
+
+	// Instagram can answer "ok" without adding anybody, so confirm with a fresh member list.
+	const addAndVerify = async () => {
+		await addUser(api, uid, tid);
+		for (let i = 0; i < 3; i++) {
+			await sleep(1500);
+			const list = await participants(api, tid);
+			if (!list.length) return { ok: true, unverified: true }; // Instagram will not list members: cannot check
+			if (list.includes(uid)) return { ok: true };
+		}
+		throw new Error("Instagram said OK but the user is not in the group (they may need to follow the bot / allow group invites)");
+	};
+
 	let lastError;
-	try { await addUser(api, uid, tid); return { ok: true }; }
+	try { return await addAndVerify(); }
 	catch (error) { lastError = error; }
 	let followed = false;
-	try { await follow(api, uid); followed = true; }
-	catch (_) { /* may already be following, or private: retry the add anyway */ }
+	try { await follow(api, uid); followed = true; } catch (_) { /* may already be following, or private: retry the add anyway */ }
 	await sleep(1500);
-	try { await addUser(api, uid, tid); return { ok: true, followed }; }
+	try { return Object.assign(await addAndVerify(), { followed }); }
 	catch (error) { lastError = error || lastError; }
 	throw new Error(errText(lastError));
+}
+
+/** Make the bot leave a group and check it really is gone; falls back to hiding the thread. */
+async function leaveVerified(api, tid) {
+	tid = String(tid);
+	const me = selfID(api);
+	await leaveGroup(api, tid);
+	await sleep(1500);
+	if (me && (await participants(api, tid)).includes(me)) {
+		// still listed: hide the chat as a last resort
+		try { await invoke(api, "deleteThread", [tid]); } catch (_) { /* ignore */ }
+		return { ok: true, stillMember: true };
+	}
+	return { ok: true };
 }
 
 /**
@@ -157,5 +184,5 @@ async function collectTargets(event, args, api, max = 5) {
 
 module.exports = {
 	invoke, firstThatWorks, errText, sleep, selfID,
-	addUser, removeUser, follow, unfollow, leaveGroup, participants, joinUser, collectTargets
+	addUser, removeUser, follow, unfollow, leaveGroup, leaveVerified, participants, joinUser, collectTargets
 };
