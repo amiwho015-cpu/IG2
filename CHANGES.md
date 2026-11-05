@@ -1,3 +1,5 @@
+- realtime push: Tanvir143 realtime MQTT (raw TLS to edge-mqtt.facebook.com, MQTToT + thrift CONNECT) added as mode `robot`: lib/instachat-api/src/transport/robot-mqtt.js, robot-mqtt-trigger.js, robot-mqttot.js. No extra npm packages. Now the default (`instachat.mqtt: true`, `instachat.mqttMode: "robot"`); auto order is robot -> ica -> native -> library. Test: node test (mock broker) in test/robot-mqtt.test.js.
+
 # Changes in this build
 
 - realtime push: InstaBOT's MQTT-over-WebSocket client (mqtt library, wss://edge-chat.instagram.com/chat, cookie auth, relaxed mqtt-packet flags, endpoint fallback, backoff reconnect, Iris sync) added as a third push mode: lib/instachat-api/src/transport/ica-mqtt.js + ica-mqtt-trigger.js. Needs `mqtt` and `duplexify` (added to package.json -> run `npm install`). `instachat.mqtt: true`, `instachat.mqttMode`: auto (default: ica -> native -> library) | ica | native | library. Polling stays as the safety net: it is slowed only after a real push arrives and returns to fast polling when the socket drops. Test: `node --test test/ica-mqtt.test.js`.

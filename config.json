@@ -116,8 +116,8 @@
     "pollIntervalMs": 500,
     "idlePollIntervalMs": 500,
     "adaptivePolling": true,
-    "mqtt": false,
-    "mqttMode": "auto",
+    "mqtt": true,
+    "mqttMode": "robot",
     "throttle": {
       "minGapMs": 250,
       "perThreadGapMs": 400,
