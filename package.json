@@ -33,7 +33,9 @@
     "st-shazam": "*",
     "systeminformation": "^5.23.5",
     "ws": "^8.18.0",
-    "yt-search": "2.13.1"
+    "yt-search": "2.13.1",
+    "axios-cookiejar-support": "^5.0.5",
+    "tough-cookie": "^4.1.4"
   },
   "author": "Saifullah Al Neoaz",
   "contributors": [
