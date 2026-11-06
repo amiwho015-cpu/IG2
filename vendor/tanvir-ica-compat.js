@@ -98,7 +98,7 @@ function callbackify(promise, callback, transform) {
 
 function installCompat(api) {
   // Version marker: if this line is missing from the Render log, the service runs an old build.
-  console.log("[ICA-COMPAT] v2 loaded: media source normalise, reply media bridge, unsend/react fixes");
+  console.log("[ICA-COMPAT] v3 loaded: media path/url payload fix, reply media bridge, unsend/react fixes");
   const messageThreads = new Map();
   api._userID = String(api.userId || "");
   api.getCurrentUserID = () => String(api.userId || api._userID || "");
@@ -159,17 +159,17 @@ function installCompat(api) {
   api.sendImage = (source, threadID, caption, cb, replyTo) => {
     ({ caption, cb } = shiftCaption(caption, cb, replyTo));
     return callbackify(withLoadable(source, "image", value =>
-      api.sendPhoto({ source: value, threadIds: [String(threadID)], caption })), cb);
+      api.sendPhoto({ ...value, threadIds: [String(threadID)], caption })), cb);
   };
   const nativeSendVideo = api.sendVideo.bind(api);
   api.sendVideoNativeCompat = nativeSendVideo;
   api.sendVideo = (source, threadID, caption, cb, replyTo) => {
     ({ cb } = shiftCaption(caption, cb, replyTo));
     return callbackify(withLoadable(source, "video", value =>
-      nativeSendVideo({ source: value, threadIds: [String(threadID)] })), cb);
+      nativeSendVideo({ ...value, threadIds: [String(threadID)] })), cb);
   };
   api.sendAudio = (source, threadID, cb, replyTo) => callbackify(
-    withLoadable(source, "audio", value => api.sendVoice({ source: value, threadIds: [String(threadID)] })), cb);
+    withLoadable(source, "audio", value => api.sendVoice({ ...value, threadIds: [String(threadID)] })), cb);
 
   // Callers use (id), (id, cb), (id, threadID) or (id, threadID, cb).
   api.unsendMessage = (messageID, ...rest) => {
