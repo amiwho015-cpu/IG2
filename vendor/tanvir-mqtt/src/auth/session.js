@@ -100,6 +100,29 @@ async function loginWithSession(client, options) {
       }
     });
   }
+  // Cookie-only login (account.txt / IG_COOKIES): the mobile API needs the
+  // Bearer IGT:2 authorization header, which a full Session JSON carries but
+  // plain cookies do not. Build it from sessionid + ds_user_id so that the
+  // cookies alone are enough.
+  if (!client.authorizationData || !client.authorizationData.sessionid) {
+    const cookieList = normalizeCookies(input);
+    const pick = (name) => {
+      const found = cookieList.find((c) => (c.key || c.name) === name);
+      return found ? String(found.value) : '';
+    };
+    let sessionid = pick('sessionid');
+    let dsUserId = pick('ds_user_id');
+    try { sessionid = decodeURIComponent(sessionid); } catch (e) { /* keep raw */ }
+    if (!dsUserId && sessionid) {
+      const m = /^(\d+)(?::|%3A)/.exec(sessionid);
+      if (m) dsUserId = m[1];
+    }
+    if (sessionid && dsUserId) {
+      client.authorizationData = { ds_user_id: dsUserId, sessionid: sessionid };
+    }
+    const mid = pick('mid');
+    if (mid && !client.mid) client.mid = mid;
+  }
   try {
     const user = await client.getCurrentUser();
     if (user && user.username) {
@@ -109,7 +132,8 @@ async function loginWithSession(client, options) {
       client.userId = Number(user.pk);
     }
   } catch (err) {
-    throw new SessionExpired('tanvir-mqtt: saved session rejected; login with credentials', {});
+    const reason = (err && (err.message || err.name)) || 'unknown error';
+    throw new SessionExpired('tanvir-mqtt: saved session rejected (' + reason + '); cookies expired? paste fresh sessionid + ds_user_id', {});
   }
   client.lastLogin = Date.now();
   return true;
