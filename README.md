@@ -677,3 +677,13 @@ This build vendors the Tanvir143 `tanvir-mqtt` ICA source under `vendor/tanvir-m
 `config.json` now sets `instachat.mqtt=true` and `instachat.mqttMode="auto"`. The bundled IG2 realtime client will try its supported realtime transports and retain polling as fallback. This is safer than pinning the `robot` transport when it returns MQTT CONNACK refused.
 
 Important: the vendored Tanvir ICA package is included for staged backend integration, but this candidate does **not** claim that every command has been verified against Tanvir's ICA transport. Instagram may also reject uploads, replies, unsend, or realtime sessions depending on account prompts, rate limits, and server-side API changes. Run the test suite and a controlled account test before production use.
+
+## IG2 + Tanvir integration notes
+
+- Added `commands/imagine.js` adapted from the supplied Tanvir project. `-imagine <prompt>` uses `IMAGINE_API_URL` (default: Tanvir PixelSter TTI endpoint).
+- `-mj <prompt>` still uses the existing external Midjourney endpoint in `src/toshiro.js`; that service must be online.
+- Reply-media commands such as `pattu add` depend on Instagram exposing the quoted message in thread history. Test them with your account before production use.
+- MQTT acceptance depends on Instagram's current session/account support; polling remains the fallback.
+
+### Session security
+Do not commit `session.json`, cookies, or tokens to GitHub. Add your own session file on the deployment host or use `SESSION_JSON`. This ZIP intentionally excludes live session data.
