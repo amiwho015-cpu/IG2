@@ -90,15 +90,34 @@ function normalizeEvent(event) {
 		});
 	}
 
-	if (normalized.repliedToMessage) {
-		const replied = normalized.repliedToMessage;
+	// Instagram transports use several names/shapes for a quoted message.
+	// Normalize all of them to the GoatBot-compatible `messageReply` shape.
+	const raw = normalized.raw && typeof normalized.raw === "object" ? normalized.raw : {};
+	const replyCandidates = [
+		normalized.messageReply, normalized.repliedToMessage, normalized.replyTo,
+		normalized.replied_to_message, normalized.reply_to_message,
+		normalized.reply_source_message, raw.replied_to_message, raw.reply_to_message,
+		raw.reply_source_message, raw.quoted_message
+	];
+	let replied = replyCandidates.find(value => value && typeof value === "object") || null;
+	if (replied) {
+		const messageID = replied.messageID || replied.item_id || replied.message_id || replied.id ||
+			replied.client_context || normalized.replied_to_message_id || raw.replied_to_message_id ||
+			raw.reply_to_message_id || null;
+		const senderID = replied.senderID || replied.senderId || replied.user_id || replied.sender_igid ||
+			replied.sender_id || replied.sender_fbid || (replied.sender && (replied.sender.igid || replied.sender.id || replied.sender.pk)) || null;
+		const body = replied.body != null ? replied.body : (replied.text != null ? replied.text :
+			(replied.text_body != null ? replied.text_body : (replied.content && replied.content.text_body) || ""));
+		const attachments = Array.isArray(replied.attachments) ? replied.attachments :
+			(Array.isArray(replied.media) ? replied.media : []);
 		normalized.messageReply = {
-			messageID: replied.messageID || null,
-			senderID: replied.senderID != null ? String(replied.senderID) : null,
-			body: replied.body != null ? String(replied.body) : "",
-			attachments: Array.isArray(replied.attachments) ? replied.attachments : [],
+			messageID: messageID != null ? String(messageID) : null,
+			senderID: senderID != null ? String(senderID) : null,
+			body: String(body || ""),
+			attachments,
 			timestamp: replied.timestamp || null
 		};
+		normalized.repliedToMessage = normalized.messageReply;
 		if (normalized.type === "message") normalized.type = "message_reply";
 	}
 

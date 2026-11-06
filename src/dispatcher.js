@@ -432,6 +432,10 @@ function createDispatcher({ api, config, registry, database }) {
 	}
 
 	async function runReplyHandlers(event, message, threadData, userData) {
+		// A prefixed command sent as a swipe-reply is still a command (e.g. `-kill`).
+		// Do not let an older interactive handler consume it before runCommands().
+		const body = typeof event.body === "string" ? event.body.trim() : "";
+		if (config.prefix && body.startsWith(config.prefix)) return false;
 		const found = findReplyEntry(event);
 		if (!found) return false;
 		const entry = found.entry;
