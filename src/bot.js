@@ -298,7 +298,11 @@ function createBot(config) {
 			if (mode === "tanvir-ica") {
 				log.info("LOGIN", "Connecting through Tanvir ICA package (session cookies)");
 				try {
-					login({ cookies: loadAccount() }, buildOptions(), finish);
+					const fullSession = require("./config").loadSessionJson();
+					if (fullSession && fullSession.uuids && fullSession.cookieStore && fullSession.authorizationData && fullSession.authorizationData.sessionid)
+						login({ session: fullSession }, buildOptions(), finish);
+					else
+						login({ cookies: loadAccount() }, buildOptions(), finish);
 				} catch (error) {
 					finish(error);
 				}
