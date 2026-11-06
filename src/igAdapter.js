@@ -112,6 +112,11 @@ async function login(params) {
 	if (settings.mqtt != null) clientOptions.mqtt = settings.mqtt;
 	if (settings.mqttMode) clientOptions.mqttMode = settings.mqttMode;
 	if (config.account && config.account.userAgent) clientOptions.userAgent = config.account.userAgent;
+	try {
+		const session = require("./config").loadSessionJson();
+		if (session) clientOptions.mobileSession = session;
+	}
+	catch (_) { /* session.json is optional */ }
 
 	const client = new (ClientClass || InstaChatClient)(clientOptions);
 	const selfListen = config.selfListen !== false;

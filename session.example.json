@@ -1,0 +1,13 @@
+{
+  "uuids": { "uuid": "", "phone_id": "", "android_device_id": "", "advertising_id": "", "client_session_id": "", "request_id": "", "tray_session_id": "" },
+  "mid": "",
+  "username": "",
+  "authorizationData": { "ds_user_id": "", "sessionid": "" },
+  "cookieStore": { "cookies": [] },
+  "deviceSettings": {},
+  "userAgent": "",
+  "locale": "en_US",
+  "country": "US",
+  "timezoneOffset": 0,
+  "csrftoken": ""
+}

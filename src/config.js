@@ -247,9 +247,54 @@ function parseAccountText(rawText) {
 	return cookies;
 }
 
+function sessionJsonPath() {
+	return process.env.IG_SESSION_PATH ? path.resolve(process.env.IG_SESSION_PATH) : path.join(ROOT, "session.json");
+}
+
+/**
+ * The full Instagram Session JSON (exported with the SESSION-JSON-COOKIES extension) kept as a file
+ * in the project root, like Tanvir143's robot. Returns null when the file is missing or unreadable.
+ */
+function loadSessionJson() {
+	const file = sessionJsonPath();
+	try {
+		if (!fs.existsSync(file)) return null;
+		const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+	}
+	catch (_) { return null; }
+}
+
+/** Cookie list from a Session JSON (cookieStore + authorizationData + csrftoken + mid). */
+function sessionToCookies(session) {
+	const out = [];
+	const seen = new Set();
+	const add = (key, value, domain, p) => {
+		if (!key || value === undefined || value === null || value === "" || seen.has(key)) return;
+		seen.add(key);
+		out.push({ key, value: String(value), domain: domain || "instagram.com", path: p || "/" });
+	};
+	const store = session && session.cookieStore && Array.isArray(session.cookieStore.cookies) ? session.cookieStore.cookies : [];
+	for (const c of store) if (c) add(c.key || c.name, c.value, c.domain, c.path);
+	const auth = (session && session.authorizationData) || {};
+	add("sessionid", auth.sessionid);
+	add("ds_user_id", auth.ds_user_id);
+	add("csrftoken", session && session.csrftoken);
+	add("mid", session && session.mid);
+	return out;
+}
+
 function loadAccount() {
-	// IG_COOKIES (env var, e.g. on Railway/Render) wins over account.txt.
+	// 1) IG_COOKIES env var (optional), 2) session.json in the project root, 3) account.txt.
 	const fromEnv = process.env.IG_COOKIES && process.env.IG_COOKIES.trim();
+	if (!fromEnv) {
+		const session = loadSessionJson();
+		if (session) {
+			const cookies = sessionToCookies(session);
+			const has = key => cookies.some(cookie => cookie.key === key);
+			if (has("sessionid") && has("ds_user_id")) return cookies;
+		}
+	}
 	if (!fromEnv && !fs.existsSync(accountPathFor()))
 		throw new Error(
 			"No Instagram cookies found. Set the IG_COOKIES environment variable, or copy account.example.txt to account.txt and paste your cookies. " +
@@ -267,6 +312,8 @@ module.exports = {
 	loadConfig,
 	saveConfig,
 	loadAccount,
+	loadSessionJson,
+	sessionToCookies,
 	normalizeCookies,
 	netScapeToCookies,
 	cookieHeaderToCookies,
