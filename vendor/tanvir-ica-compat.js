@@ -5,7 +5,87 @@
 
 "use strict";
 
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const localICA = require("./tanvir-mqtt");
+
+const MEDIA_TMP = path.join(os.tmpdir(), "instabot-ica-media");
+
+/*
+ * tanvir-mqtt's sendPhoto / sendVideo / sendVoice only accept { path } or { url }.
+ * The bot layer hands over whatever it has: a Buffer (gcimg, converted audio),
+ * a stream, a local path or a URL string. Normalise all of them to { path } / { url }
+ * so the vendored loader never throws "media send needs { path } or { url }".
+ */
+function rand() { return Math.random().toString(36).slice(2, 12); }
+
+function sniffExt(buf, kind) {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8) return ".jpg";
+  if (buf.length >= 4 && buf[0] === 0x89 && buf.slice(1, 4).toString("ascii") === "PNG") return ".png";
+  if (buf.length >= 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP") return ".webp";
+  if (buf.length >= 12 && buf.slice(4, 8).toString("ascii") === "ftyp") return kind === "audio" ? ".m4a" : ".mp4";
+  return kind === "audio" ? ".m4a" : kind === "video" ? ".mp4" : ".jpg";
+}
+
+function drainStream(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on("data", c => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
+
+async function toLoadable(source, kind) {
+  if (Array.isArray(source)) source = source[0];
+  if (source == null) throw new Error("no media source given");
+
+  // { url | path | buffer | stream, filename, ... } wrappers
+  if (typeof source === "object" && !Buffer.isBuffer(source) && typeof source.pipe !== "function") {
+    if (source.url) return { value: { url: String(source.url) }, cleanup: null };
+    if (source.path) return { value: { path: String(source.path) }, cleanup: null };
+    const inner = source.buffer || source.stream;
+    if (inner == null) throw new Error("media object has no buffer/stream/path/url");
+    source = inner;
+  }
+
+  if (typeof source === "string") {
+    if (/^https?:\/\//i.test(source)) return { value: { url: source }, cleanup: null };
+    if (fs.existsSync(source)) return { value: { path: source }, cleanup: null };
+    throw new Error(`media not found: ${source.slice(0, 80)}`);
+  }
+
+  let buffer;
+  if (Buffer.isBuffer(source)) {
+    buffer = source;
+  }
+  else if (typeof source.pipe === "function") {
+    if (source.path && fs.existsSync(String(source.path))) return { value: { path: String(source.path) }, cleanup: null };
+    buffer = await drainStream(source);
+  }
+  else {
+    throw new Error("unsupported media source type");
+  }
+  if (!buffer.length) throw new Error("media source is empty");
+
+  fs.mkdirSync(MEDIA_TMP, { recursive: true });
+  const file = path.join(MEDIA_TMP, `${rand()}${sniffExt(buffer, kind)}`);
+  fs.writeFileSync(file, buffer);
+  return { value: { path: file }, cleanup: () => fs.unlink(file, () => { }) };
+}
+
+async function withLoadable(source, kind, run) {
+  const { value, cleanup } = await toLoadable(source, kind);
+  try { return await run(value); }
+  finally { if (cleanup) cleanup(); }
+}
+
+/* Some callers pass the callback where the caption goes: shift the arguments. */
+function shiftCaption(caption, cb, replyTo) {
+  if (typeof caption === "function") return { caption: "", cb: caption, replyTo: cb };
+  return { caption: caption == null ? "" : caption, cb, replyTo };
+}
 
 function callbackify(promise, callback, transform) {
   const p = Promise.resolve(promise).then(value => transform ? transform(value) : value);
@@ -65,20 +145,37 @@ function installCompat(api) {
     const payload = typeof form === "string" ? { text: form } : { text: String((form && (form.body || form.text)) || "") };
     payload.threadIds = [String(threadID)];
     if (replyTo) payload.replyTo = { id: String(replyTo.messageID || replyTo.id || replyTo), client_context: replyTo.client_context };
-    return callbackify(nativeSendMessage(payload), cb);
+    // Remember which thread each sent message went to, so unsend/react can find it later.
+    const remember = r => {
+      const id = r && (r.id || r.messageID || r.messageId || r.item_id);
+      if (id) messageThreads.set(String(id), String(threadID));
+      return r;
+    };
+    return callbackify(Promise.resolve(nativeSendMessage(payload)).then(remember), cb);
   };
 
-  api.sendImage = (source, threadID, caption, cb, replyTo) => callbackify(
-    api.sendPhoto({ source, threadIds: [String(threadID)], caption }), cb);
+  api.sendImage = (source, threadID, caption, cb, replyTo) => {
+    ({ caption, cb } = shiftCaption(caption, cb, replyTo));
+    return callbackify(withLoadable(source, "image", value =>
+      api.sendPhoto({ source: value, threadIds: [String(threadID)], caption })), cb);
+  };
   const nativeSendVideo = api.sendVideo.bind(api);
   api.sendVideoNativeCompat = nativeSendVideo;
-  api.sendVideo = (source, threadID, cb) => callbackify(nativeSendVideo({ source, threadIds: [String(threadID)] }), cb);
-  api.sendAudio = (source, threadID, cb, replyTo) => callbackify(api.sendVoice({ source, threadIds: [String(threadID)] }), cb);
+  api.sendVideo = (source, threadID, caption, cb, replyTo) => {
+    ({ cb } = shiftCaption(caption, cb, replyTo));
+    return callbackify(withLoadable(source, "video", value =>
+      nativeSendVideo({ source: value, threadIds: [String(threadID)] })), cb);
+  };
+  api.sendAudio = (source, threadID, cb, replyTo) => callbackify(
+    withLoadable(source, "audio", value => api.sendVoice({ source: value, threadIds: [String(threadID)] })), cb);
 
-  api.unsendMessage = (messageID, cb) => {
+  // Callers use (id), (id, cb), (id, threadID) or (id, threadID, cb).
+  api.unsendMessage = (messageID, ...rest) => {
+    const cb = rest.find(a => typeof a === "function");
+    const explicitThread = rest.find(a => typeof a === "string" || typeof a === "number");
     // ICA requires thread id; locate the message in recent threads where possible.
     const run = async () => {
-      let threadId = messageThreads.get(String(messageID));
+      let threadId = explicitThread != null ? String(explicitThread) : messageThreads.get(String(messageID));
       if (!threadId) {
         const threads = await api.getThreads({ amount: 30 });
         for (const thread of threads) {
@@ -94,9 +191,12 @@ function installCompat(api) {
     return callbackify(run(), cb);
   };
 
-  api.setMessageReaction = (reaction, messageID, cb) => {
+  // Callers use (emoji, id), (emoji, id, cb), (emoji, id, threadID) or (emoji, id, threadID, cb).
+  api.setMessageReaction = (reaction, messageID, ...rest) => {
+    const cb = rest.find(a => typeof a === "function");
+    const explicitThread = rest.find(a => typeof a === "string" || typeof a === "number");
     const run = async () => {
-      let threadId = messageThreads.get(String(messageID));
+      let threadId = explicitThread != null ? String(explicitThread) : messageThreads.get(String(messageID));
       if (!threadId) {
         const threads = await api.getThreads({ amount: 30 });
         for (const thread of threads) {
@@ -172,4 +272,4 @@ function login(options, botOptions, callback) {
   localICA.login(opts).then(api => callbackify(Promise.resolve(installCompat(api)), callback), error => callback(error));
 }
 
-module.exports = Object.freeze({ login, packageName: "./tanvir-mqtt" });
+module.exports = Object.freeze({ login, packageName: "./tanvir-mqtt", _toLoadable: toLoadable });

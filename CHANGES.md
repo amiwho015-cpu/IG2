@@ -14,3 +14,12 @@
 - new commands: batslap, beautiful, horny, welcome, welcard, tiksearch (src/canvasApi.js learns the API parameter names)
 - included: song-fix (sing, sing2, songDownload), nix-birthday (nix, birthday, githubSync, database)
 - debug: unknown event types are logged once as "EVENT?"
+
+## Media send / unsend / react fixes (vendor/tanvir-ica-compat.js)
+- sendImage / sendVideo / sendAudio now accept Buffer, stream, local path, URL string, or { buffer | stream | path | url }.
+  Sources are normalised to { path } or { url } before reaching tanvir-mqtt, which only understood those two.
+  Fixes "tanvir-mqtt: media send needs { path } or { url }" (gcimg and every Buffer-based command).
+- sendVideo accepts the caption slot (sendVideo(src, tid, caption, cb, reply)) used by the video retry path.
+- unsendMessage and setMessageReaction accept (id, threadID, cb) as well as (id, cb). Previously the threadID was
+  taken as the callback, so unsend/react callbacks never fired.
+- Messages sent by the bot are remembered with their thread, so unsend/react can find them without a prior listen event.
