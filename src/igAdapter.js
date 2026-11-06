@@ -212,6 +212,7 @@ async function login(params) {
 					payload.mentions = Object.entries(mentions).map(([userId, username]) => ({ userId, username }));
 				}
 			}
+			try { log.info("SEND", `pid ${process.pid} thread ${tid} ${reply ? "reply" : "send"}: ${String(typeof payload === "string" ? payload : (payload && payload.body) || (payload && payload.attachments ? "[attachment]" : "")).slice(0, 40)}`); } catch (_) { /* log only */ }
 			const res = reply
 				? await client.reply(tid, reply, payload)
 				: await client.sendMessage(tid, payload);
