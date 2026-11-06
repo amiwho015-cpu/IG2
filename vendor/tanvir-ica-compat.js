@@ -191,6 +191,9 @@ function installCompat(api) {
     return callbackify(run(), cb);
   };
 
+  // Keep the vendored method: the wrapper below replaces api.setMessageReaction,
+  // and calling api.setMessageReaction from inside it would call itself.
+  const nativeSetMessageReaction = typeof api.setMessageReaction === "function" ? api.setMessageReaction.bind(api) : null;
   // Callers use (emoji, id), (emoji, id, cb), (emoji, id, threadID) or (emoji, id, threadID, cb).
   api.setMessageReaction = (reaction, messageID, ...rest) => {
     const cb = rest.find(a => typeof a === "function");
@@ -207,7 +210,8 @@ function installCompat(api) {
         }
       }
       if (!threadId) throw new Error("Cannot react: message thread was not found.");
-      return api.setMessageReaction({ threadId: String(threadId), messageId: String(messageID), emoji: String(reaction) });
+      if (!nativeSetMessageReaction) throw new Error("setMessageReaction is not available in this ICA build");
+      return nativeSetMessageReaction({ threadId: String(threadId), messageId: String(messageID), emoji: String(reaction) });
     };
     return callbackify(run(), cb);
   };
@@ -255,11 +259,57 @@ function installCompat(api) {
     return callbackify(run(), cb);
   };
 
+  // Reply bridge. The vendored listener only says WHICH message was replied to
+  // (event.replyTo.itemId) and never carries its media. The bot's commands read
+  // event.repliedToMessage / event.messageReply.attachments, so fill those in here:
+  // from a cache of recently seen items first, then from the thread history.
+  const { extractAttachments } = require("./tanvir-mqtt/src/message/normalize");
+  const itemCache = new Map(); // itemID -> { attachments, text, senderID }
+  const rememberItem = event => {
+    if (!event || !event.messageID) return;
+    const attachments = Array.isArray(event.attachments) ? event.attachments : [];
+    if (!attachments.length && !event.body) return;
+    itemCache.set(String(event.messageID), { attachments, text: event.body || "", senderID: event.senderID || "" });
+    if (itemCache.size > 3000) itemCache.delete(itemCache.keys().next().value);
+  };
+  const findItem = async (itemID, threadID) => {
+    const cached = itemCache.get(String(itemID));
+    if (cached && cached.attachments.length) return cached;
+    if (!threadID) return cached || null;
+    try {
+      const thread = await api.getThread(String(threadID), { amount: 40 });
+      const items = (thread && thread.messages) || [];
+      const item = items.find(m => String(m.id || m.item_id) === String(itemID));
+      if (!item) return cached || null;
+      const found = {
+        attachments: extractAttachments(item),
+        text: typeof item.text === "string" ? item.text : (cached && cached.text) || "",
+        senderID: item.user_id != null ? String(item.user_id) : (cached && cached.senderID) || "",
+      };
+      itemCache.set(String(itemID), found);
+      return found;
+    }
+    catch (_) { return cached || null; }
+  };
+
   const nativeListen = api.listen.bind(api);
   api.listenMqtt = (callback) => {
     const stop = nativeListen(event => {
       if (event && event.messageID && event.threadID) messageThreads.set(String(event.messageID), String(event.threadID));
-      callback(null, event);
+      rememberItem(event);
+      const ref = event && event.replyTo;
+      const emit = () => { try { callback(null, event); } catch (e) { console.error("[listen] callback threw:", e && e.message || e); } };
+      if (!ref || !ref.itemId || event.repliedToMessage) return emit();
+      const replyID = String(ref.itemId);
+      findItem(replyID, event.threadID).then(found => {
+        event.repliedToMessage = {
+          messageID: replyID,
+          senderID: ref.authorUserId || (found && found.senderID) || null,
+          body: (found && found.text) || ref.text || "",
+          attachments: (found && found.attachments) || [],
+          timestamp: null,
+        };
+      }, () => { /* keep the event without media */ }).then(emit);
     });
     return typeof stop === "function" ? stop : () => api.realtimeDisconnect();
   };

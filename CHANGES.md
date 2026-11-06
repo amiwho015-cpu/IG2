@@ -23,3 +23,10 @@
 - unsendMessage and setMessageReaction accept (id, threadID, cb) as well as (id, cb). Previously the threadID was
   taken as the callback, so unsend/react callbacks never fired.
 - Messages sent by the bot are remembered with their thread, so unsend/react can find them without a prior listen event.
+
+## Reply media bridge + reaction fix (vendor/tanvir-ica-compat.js)
+- In tanvir-ica mode the vendored listener only sets event.replyTo (id + author). The bot reads
+  event.repliedToMessage / messageReply, which was never set, so every reply command (pattu add, edit,
+  reply-target commands) saw no media. listenMqtt now fills repliedToMessage: attachments come from a cache of
+  recently seen items, or from the thread history when the replied message is older.
+- api.setMessageReaction no longer calls itself (it used to recurse via the replaced method).
