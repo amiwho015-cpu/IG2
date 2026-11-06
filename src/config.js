@@ -256,13 +256,19 @@ function sessionJsonPath() {
  * in the project root, like Tanvir143's robot. Returns null when the file is missing or unreadable.
  */
 function loadSessionJson() {
-	const file = sessionJsonPath();
+	// Railway: paste the complete Session JSON into the SESSION_JSON variable.
+	// The environment variable takes priority over the optional local session.json file.
+	const fromEnv = process.env.SESSION_JSON && process.env.SESSION_JSON.trim();
 	try {
-		if (!fs.existsSync(file)) return null;
-		const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+		const raw = fromEnv || (fs.existsSync(sessionJsonPath()) ? fs.readFileSync(sessionJsonPath(), "utf8") : "");
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
 		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
 	}
-	catch (_) { return null; }
+	catch (error) {
+		if (fromEnv) throw new Error(`SESSION_JSON is invalid JSON: ${error.message}`);
+		return null;
+	}
 }
 
 /** Cookie list from a Session JSON (cookieStore + authorizationData + csrftoken + mid). */
@@ -285,7 +291,7 @@ function sessionToCookies(session) {
 }
 
 function loadAccount() {
-	// 1) IG_COOKIES env var (optional), 2) session.json in the project root, 3) account.txt.
+	// 1) IG_COOKIES env var, 2) SESSION_JSON env var / session.json file, 3) account.txt.
 	const fromEnv = process.env.IG_COOKIES && process.env.IG_COOKIES.trim();
 	if (!fromEnv) {
 		const session = loadSessionJson();
