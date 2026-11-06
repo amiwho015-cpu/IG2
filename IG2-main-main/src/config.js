@@ -1,0 +1,330 @@
+"use strict";
+
+/**
+ * Configuration + Instagram cookie loading.
+ * Author: Saifullah Al Neoaz (https://github.com/lazyneoaz)
+ */
+
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.resolve(__dirname, "..");
+// IG_CONFIG_PATH lets tests (and unusual deployments) point at a scratch config
+// instead of the repo's config.json — otherwise a command that calls saveConfig
+// (e.g. `prefix`) would overwrite the operator's real file during a test run.
+// Resolved per call so the override can be set at any time.
+function configPathFor() {
+	return process.env.IG_CONFIG_PATH
+		? path.resolve(process.env.IG_CONFIG_PATH)
+		: path.join(ROOT, "config.json");
+}
+function accountPathFor() {
+	return process.env.IG_ACCOUNT_PATH
+		? path.resolve(process.env.IG_ACCOUNT_PATH)
+		: path.join(ROOT, "account.txt");
+}
+const accountPath = accountPathFor();
+
+function readJSON(file) {
+	const raw = fs.readFileSync(file, "utf8");
+	try {
+		return JSON.parse(raw);
+	}
+	catch (error) {
+		throw new Error(`Invalid JSON in ${path.basename(file)}: ${error.message}`);
+	}
+}
+
+function loadConfig() {
+	if (!fs.existsSync(configPathFor()))
+		throw new Error("config.json not found");
+	const config = readJSON(configPathFor());
+
+	config.botName = config.botName || "InstaBOT";
+	config.prefix = typeof config.prefix === "string" ? config.prefix : "-";
+	config.language = config.language || "en";
+	// Bot admins are the accounts allowed to run admin-only commands. They are
+	// per-deployment, never baked into the repo: set them in config.json, or in
+	// the environment as a comma-separated IG_ADMIN_BOT (it wins).
+	config.adminBot = Array.isArray(config.adminBot) ? config.adminBot.map(String).filter(Boolean) : [];
+	if (process.env.IG_ADMIN_BOT && process.env.IG_ADMIN_BOT.trim()) {
+		config.adminBot = process.env.IG_ADMIN_BOT.split(",").map(s => s.trim()).filter(Boolean);
+	}
+	config.whiteList = config.whiteList || { enable: false, userIDs: [], threadIDs: [] };
+	config.whiteList.userIDs = (config.whiteList.userIDs || []).map(String);
+	config.whiteList.threadIDs = (config.whiteList.threadIDs || []).map(String);
+	config.onlineStatus = config.onlineStatus || {};
+	config.database = config.database || {};
+	config.database.dir = config.database.dir || "data";
+
+	// These are read unconditionally by the dispatcher, so guarantee their shape
+	// even when an operator trims them out of config.json.
+	config.hideNotiMessage = config.hideNotiMessage || {};
+	config.adminOnly = config.adminOnly || {};
+	config.adminOnly.enable = config.adminOnly.enable === true;
+	config.adminOnly.ignoreCommands = Array.isArray(config.adminOnly.ignoreCommands)
+		? config.adminOnly.ignoreCommands.map(String)
+		: [];
+	config.cooldown = config.cooldown || {};
+	config.cooldown.default = Number(config.cooldown.default) || 0;
+	config.logEvents = config.logEvents || {};
+	config.antiInbox = config.antiInbox === true;
+	config.noPrefix = config.noPrefix === true;
+
+	// Optional secrets/endpoints for custom commands.
+	//
+	// Only the namespaced INSTABOT_* variables are read: hosts like Render set a
+	// bare `URL` (the service's own public URL) and `PORT`, and picking those up
+	// as an API endpoint silently broke commands (e.g. `sing` hitting the bot's
+	// own host and getting a 404).
+	config.env = config.env || {};
+	config.env.token = process.env.INSTABOT_TOKEN || config.env.token || "";
+	config.env.url = process.env.INSTABOT_URL || config.env.url || "";
+
+	// Music: blank apiUrl means "use Instagram's own catalogue". NEVER fall back
+	// to env.url — that is not a music server, and a host like Render/Railway
+	// that sets URL/INSTABOT_URL for its own service would make `sing` query the
+	// bot's own host and get a 404.
+	config.music = config.music || {};
+	config.music.enable = config.music.enable !== false;
+	config.music.apiUrl = config.music.apiUrl || "";
+	config.music.apiToken = config.music.apiToken || "";
+
+	// Private ig-chat-api server.
+	//
+	// The environment WINS over config.json. This is deliberate: a forked repo
+	// can carry a committed `server.url` from whoever published it, and a
+	// deployment must always be able to point at its own server. Before, the
+	// file value took priority, so everyone who forked and set IG_API_SERVER in
+	// their host dashboard still connected to the original author's server (and
+	// therefore to that author's Instagram account).
+	config.server = config.server || {};
+	config.server.url = process.env.IG_API_SERVER || config.server.url || "";
+	config.server.token = process.env.IG_API_TOKEN || config.server.token || "";
+	// There is deliberately no bot id to configure. The server identifies each
+	// session by the account's own Instagram id, and the bot learns its id from
+	// the server's /cookies reply (see auth.js). Any legacy botId in config.json
+	// / IG_BOT_ID is ignored.
+	delete config.server.botId;
+	config.server.timeout = Number(config.server.timeout) || 60000;
+	// "direct" = log in with the local ig-chat-api package (like Insta-Bot3);
+	// anything else = use the hosted server above. IG_MODE overrides the file.
+	// The old hosted ICA server is dead, so every deploy uses the built-in instachat-api
+	// no matter what stale IG_MODE / IG_API_SERVER variables or config.json say.
+	// Only IG_FORCE_MODE=1 lets IG_MODE (or config.server.mode) pick "direct" / "server".
+	const modeEnv = process.env.IG_MODE && process.env.IG_MODE.trim().toLowerCase();
+	const fileMode = String(config.server.mode || "").toLowerCase();
+	const validModes = ["instachat", "tanvir-ica", "direct", "server"];
+	const forced = process.env.IG_FORCE_MODE === "1";
+	// Tanvir ICA is the active local login/realtime transport by default.
+	config.server.mode = forced
+		? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "tanvir-ica"))
+		: "tanvir-ica";
+	// instachat-api (vendored in lib/instachat-api): polling + send throttle settings.
+	const ic = config.instachat && typeof config.instachat === "object" ? config.instachat : {};
+	config.instachat = ic;
+	if (!(Number(ic.pollIntervalMs) >= 300)) ic.pollIntervalMs = 2500;
+	if (!(Number(ic.idlePollIntervalMs) >= 300)) ic.idlePollIntervalMs = 8000;
+	if (ic.adaptivePolling == null) ic.adaptivePolling = true;
+	// Realtime push (MQTT over WebSocket): off unless enabled; mode ica|native|library|auto.
+	if (ic.mqtt == null) ic.mqtt = false;
+	if (!ic.mqttMode) ic.mqttMode = "auto";
+	if (ic.throttle !== false) {
+		ic.throttle = ic.throttle && typeof ic.throttle === "object" ? ic.throttle : {};
+		if (ic.throttle.minGapMs == null) ic.throttle.minGapMs = 450;
+		if (ic.throttle.perThreadGapMs == null) ic.throttle.perThreadGapMs = 700;
+		if (ic.throttle.jitterMs == null) ic.throttle.jitterMs = 150;
+	}
+	config.optionsFca = config.optionsFca && typeof config.optionsFca === "object" ? config.optionsFca : {};
+
+	// Typing indicator shown before the bot sends anything (toggle: `typingindicator`).
+	config.typingIndicator = config.typingIndicator || {};
+	if (config.typingIndicator.enable == null) config.typingIndicator.enable = true;
+	if (!(Number(config.typingIndicator.duration) > 0)) config.typingIndicator.duration = 1000;
+
+	// Welcome / leave announcements for group threads.
+	config.welcome = config.welcome || {};
+	if (config.welcome.enable == null) config.welcome.enable = true;
+	if (!config.welcome.message) config.welcome.message = "Welcome %1 to %2! 👋";
+	if (!Array.isArray(config.welcome.threadIDs)) config.welcome.threadIDs = [];
+
+	config.leave = config.leave || {};
+	if (config.leave.enable == null) config.leave.enable = true;
+	if (!config.leave.message) config.leave.message = "%1 left %2. 👋";
+	if (!Array.isArray(config.leave.threadIDs)) config.leave.threadIDs = [];
+
+	return config;
+}
+
+function saveConfig(config) {
+	fs.writeFileSync(configPathFor(), JSON.stringify(config, null, "\t") + "\n");
+}
+
+function isNetScapeCookie(text) {
+	return /(.+)\t(1|TRUE|true)\t([\w/.-]*)\t(1|TRUE|true)\t\d+\t([\w-]+)\t(.+)/i.test(text);
+}
+
+function netScapeToCookies(text) {
+	const cookies = [];
+	for (const rawLine of text.split(/\r?\n/)) {
+		const line = rawLine.trim();
+		// `#HttpOnly_` lines are real cookies, not comments; only skip the rest.
+		if (!line || (line.startsWith("#") && !/^#HttpOnly_/i.test(line))) continue;
+		const fields = line.replace(/^#HttpOnly_/i, "").split("\t").map(f => f.trim()).filter(Boolean);
+		if (fields.length < 7) continue;
+		cookies.push({
+			key: fields[5],
+			value: fields[6],
+			domain: fields[0].replace(/^\./, ""),
+			path: fields[2] || "/"
+		});
+	}
+	return cookies;
+}
+
+function cookieHeaderToCookies(text) {
+	return String(text)
+		.replace(/^cookie\s*:/i, "")
+		.replace(/\r?\n/g, " ")
+		.split(";")
+		.map(part => part.trim())
+		.filter(Boolean)
+		.map(part => {
+			const index = part.indexOf("=");
+			if (index < 1) return null;
+			return {
+				key: part.slice(0, index).trim(),
+				value: part.slice(index + 1).trim(),
+				domain: "instagram.com",
+				path: "/"
+			};
+		})
+		.filter(Boolean);
+}
+
+function normalizeCookies(list) {
+	return (Array.isArray(list) ? list : [])
+		.map(item => {
+			if (!item || typeof item !== "object") return null;
+			const key = item.key || item.name;
+			return key ? { key, value: item.value, domain: item.domain || "instagram.com", path: item.path || "/" } : null;
+		})
+		.filter(item => item && item.key && item.value !== undefined);
+}
+
+/**
+ * Parse account.txt into an Instagram cookie list.
+ * Accepts: JSON array, JSON object, cookie header string, Netscape file.
+ */
+function parseAccountText(rawText) {
+	const text = String(rawText || "").trim();
+	if (!text) throw new Error("account.txt is empty");
+
+	let cookies = [];
+
+	if (text.startsWith("[") || text.startsWith("{")) {
+		let parsed;
+		try {
+			parsed = JSON.parse(text);
+		}
+		catch (error) {
+			throw new Error(`account.txt is invalid JSON: ${error.message}`);
+		}
+		if (!Array.isArray(parsed)) {
+			const obj = parsed.cookies || parsed.appState || parsed;
+			parsed = Array.isArray(obj) ? obj : Object.keys(obj).map(key => ({ key, value: obj[key] }));
+		}
+		cookies = normalizeCookies(parsed);
+	}
+	else if (isNetScapeCookie(text)) {
+		cookies = netScapeToCookies(text);
+	}
+	else {
+		cookies = cookieHeaderToCookies(text);
+	}
+
+	const has = key => cookies.some(cookie => cookie.key === key);
+	if (!has("sessionid") || !(has("ds_user_id") || has("userid")))
+		throw new Error("Instagram cookies (IG_COOKIES / account.txt) must contain Instagram `sessionid` and `ds_user_id` cookies");
+
+	return cookies;
+}
+
+function sessionJsonPath() {
+	return process.env.IG_SESSION_PATH ? path.resolve(process.env.IG_SESSION_PATH) : path.join(ROOT, "session.json");
+}
+
+/**
+ * The full Instagram Session JSON (exported with the SESSION-JSON-COOKIES extension) kept as a file
+ * in the project root, like Tanvir143's robot. Returns null when the file is missing or unreadable.
+ */
+function loadSessionJson() {
+	// Railway: paste the complete Session JSON into the SESSION_JSON variable.
+	// The environment variable takes priority over the optional local session.json file.
+	const fromEnv = process.env.SESSION_JSON && process.env.SESSION_JSON.trim();
+	try {
+		const raw = fromEnv || (fs.existsSync(sessionJsonPath()) ? fs.readFileSync(sessionJsonPath(), "utf8") : "");
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+	}
+	catch (error) {
+		if (fromEnv) throw new Error(`SESSION_JSON is invalid JSON: ${error.message}`);
+		return null;
+	}
+}
+
+/** Cookie list from a Session JSON (cookieStore + authorizationData + csrftoken + mid). */
+function sessionToCookies(session) {
+	const out = [];
+	const seen = new Set();
+	const add = (key, value, domain, p) => {
+		if (!key || value === undefined || value === null || value === "" || seen.has(key)) return;
+		seen.add(key);
+		out.push({ key, value: String(value), domain: domain || "instagram.com", path: p || "/" });
+	};
+	const store = session && session.cookieStore && Array.isArray(session.cookieStore.cookies) ? session.cookieStore.cookies : [];
+	for (const c of store) if (c) add(c.key || c.name, c.value, c.domain, c.path);
+	const auth = (session && session.authorizationData) || {};
+	add("sessionid", auth.sessionid);
+	add("ds_user_id", auth.ds_user_id);
+	add("csrftoken", session && session.csrftoken);
+	add("mid", session && session.mid);
+	return out;
+}
+
+function loadAccount() {
+	// 1) IG_COOKIES env var, 2) SESSION_JSON env var / session.json file, 3) account.txt.
+	const fromEnv = process.env.IG_COOKIES && process.env.IG_COOKIES.trim();
+	if (!fromEnv) {
+		const session = loadSessionJson();
+		if (session) {
+			const cookies = sessionToCookies(session);
+			const has = key => cookies.some(cookie => cookie.key === key);
+			if (has("sessionid") && has("ds_user_id")) return cookies;
+		}
+	}
+	if (!fromEnv && !fs.existsSync(accountPathFor()))
+		throw new Error(
+			"No Instagram cookies found. Set the IG_COOKIES environment variable, or copy account.example.txt to account.txt and paste your cookies. " +
+			"account.txt is git-ignored, so your cookies are never committed."
+		);
+	return parseAccountText(fromEnv || fs.readFileSync(accountPathFor(), "utf8"));
+}
+
+module.exports = {
+	parseAccountText,
+	loadAccountFromEnv: parseAccountText,
+	ROOT,
+	get configPath() { return configPathFor(); },
+	get accountPath() { return accountPathFor(); },
+	loadConfig,
+	saveConfig,
+	loadAccount,
+	loadSessionJson,
+	sessionToCookies,
+	normalizeCookies,
+	netScapeToCookies,
+	cookieHeaderToCookies,
+	isNetScapeCookie
+};
