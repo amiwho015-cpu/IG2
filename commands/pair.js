@@ -18,6 +18,34 @@ const BACKGROUNDS = [
   "https://i.imgur.com/5OO802y.jpeg"
 ];
 
+
+async function resolvePairProfile(api, target) {
+  const query = String(target?.id || target?.query || "").trim().replace(/^@/, "");
+  if (!query) return null;
+  try {
+    if (typeof api.getUserInfo === "function") {
+      const result = await api.getUserInfo([query]);
+      const profile = result && (result[query] || Object.values(result)[0]);
+      if (profile && (profile.profilePicture || profile.thumbSrc || profile.username || profile.userID)) return profile;
+    }
+  } catch (error) {
+    console.warn("[pair] direct profile lookup failed:", error.message);
+  }
+  // Fallback to Instagram's own user search (not Pinterest or a random image site).
+  if (!target.id && typeof api.searchUsers === "function") {
+    try {
+      const results = await api.searchUsers(query);
+      if (Array.isArray(results) && results.length) {
+        const exact = results.find(u => String(u.username || "").toLowerCase() === query.toLowerCase());
+        return exact || results[0];
+      }
+    } catch (error) {
+      console.warn("[pair] Instagram user search failed:", error.message);
+    }
+  }
+  return null;
+}
+
 module.exports = {
   config: {
     name: "pair",
@@ -35,34 +63,73 @@ module.exports = {
     try {
       let targetID = senderID;
       let targetName = null;
+      let avt1 = null;
+      let avt2 = null;
+      let senderName = "User";
+      let partner = null;
+      let senderGender = 0;
 
-      if (messageReply) {
-        targetID = messageReply.senderID;
-        try {
-          const userData = await usersData.get(targetID);
-          targetName = userData.name || "User";
-        } catch {
-          targetName = "User";
+      // Explicit targets: .pair @username1 @username2, .pair @username, or .pair name
+      // Mention IDs are preferred; otherwise resolve public Instagram usernames/search results.
+      const mentionedIDs = Object.keys(event.mentions || {});
+      const rawTargets = (Array.isArray(args) ? args : [])
+        .map(v => String(v).trim())
+        .filter(v => v && !["boy", "girl", "random"].includes(v.toLowerCase()));
+      const explicitTargets = [];
+      for (let i = 0; i < Math.max(mentionedIDs.length, rawTargets.length); i++) {
+        if (mentionedIDs[i]) explicitTargets.push({ id: mentionedIDs[i] });
+        else if (rawTargets[i]) explicitTargets.push({ query: rawTargets[i].replace(/^@/, "") });
+      }
+
+      if (explicitTargets.length >= 2) {
+        const [p1, p2] = await Promise.all([
+          resolvePairProfile(api, explicitTargets[0]),
+          resolvePairProfile(api, explicitTargets[1])
+        ]);
+        if (!p1 || !p2) throw new Error("দুইজনের Instagram profile পাওয়া যায়নি। @username দিয়ে চেষ্টা করো।");
+        senderName = p1.name || p1.username || "User 1";
+        partner = { id: p2.userID || p2.id || p2.username, name: p2.name || p2.username || "User 2", gender: 0 };
+        avt1 = p1.profilePicture || p1.thumbSrc || p1.profile_pic_url || null;
+        avt2 = p2.profilePicture || p2.thumbSrc || p2.profile_pic_url || null;
+        senderGender = 0;
+      } else if (explicitTargets.length === 1) {
+        const p2 = await resolvePairProfile(api, explicitTargets[0]);
+        if (!p2) throw new Error("Instagram profile পাওয়া যায়নি। @username দিয়ে চেষ্টা করো।");
+        const me = await usersData.get(senderID);
+        senderName = me.name || "User";
+        partner = { id: p2.userID || p2.id || p2.username, name: p2.name || p2.username || "User", gender: 0 };
+        avt1 = await usersData.getAvatarUrl(senderID);
+        avt2 = p2.profilePicture || p2.thumbSrc || p2.profile_pic_url || null;
+        senderGender = me.gender || 0;
+      } else {
+        if (messageReply) {
+          targetID = messageReply.senderID;
+          try {
+            const userData = await usersData.get(targetID);
+            targetName = userData.name || "User";
+          } catch { targetName = "User"; }
         }
+
+        const [senderData, threadInfo] = await Promise.all([
+          usersData.get(targetID),
+          safeThreadInfo(api, threadID, event)
+        ]);
+        senderName = targetName || senderData.name || "User";
+        const members = threadInfo.participantIDs.map(String).filter(uid => uid != String(targetID));
+        const wanted = ["boy", "girl"].includes(String(args[0] || "").toLowerCase()) ? String(args[0]).toLowerCase() : null;
+        let me;
+        try {
+          ({ me, partner } = await pickPartner(usersData, String(targetID), members, wanted));
+        } catch (e) {
+          if (e.friendly) return api.sendMessage("⚠️ " + e.message, threadID, messageID);
+          throw e;
+        }
+        senderGender = me.gender;
+        avt1 = await usersData.getAvatarUrl(targetID);
+        avt2 = await usersData.getAvatarUrl(partner.id);
       }
 
-      const [senderData, threadInfo] = await Promise.all([
-        usersData.get(targetID),
-        safeThreadInfo(api, threadID, event)
-      ]);
-
-      const senderName = targetName || senderData.name || "User";
-
-      const members = threadInfo.participantIDs.map(String).filter(uid => uid != String(targetID));
-      const wanted = ["boy", "girl"].includes(String(args[0] || "").toLowerCase()) ? String(args[0]).toLowerCase() : null;
-      let me, partner;
-      try {
-        ({ me, partner } = await pickPartner(usersData, String(targetID), members, wanted));
-      } catch (e) {
-        if (e.friendly) return api.sendMessage("⚠️ " + e.message, threadID, messageID);
-        throw e;
-      }
-      const senderGender = me.gender;
+      if (!avt1 || !avt2) throw new Error("Profile picture পাওয়া যায়নি; account public আছে কি না দেখো।");
 
       const match = Math.floor(Math.random() * 31) + 70;
 
@@ -77,9 +144,6 @@ module.exports = {
       const randomBg = BACKGROUNDS[Math.floor(Math.random() * BACKGROUNDS.length)];
 
       const templateImg = await safeLoadBackground(Canvas, axios, randomBg);
-
-      const avt1 = await usersData.getAvatarUrl(targetID);
-      const avt2 = await usersData.getAvatarUrl(partner.id);
 
       const loadImage = url => safeLoadImage(Canvas, axios, url);
 

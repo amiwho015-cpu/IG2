@@ -687,3 +687,18 @@ Important: the vendored Tanvir ICA package is included for staged backend integr
 
 ### Session security
 Do not commit `session.json`, cookies, or tokens to GitHub. Add your own session file on the deployment host or use `SESSION_JSON`. This ZIP intentionally excludes live session data.
+
+
+## Tanvir ICA integration (2026-11)
+- The default local login/listener mode is now `tanvir-ica`, using the bundled `vendor/tanvir-mqtt` package through `vendor/tanvir-ica-compat.js`.
+- Existing commands, including `commands/song.js`, are preserved unchanged.
+- `commands/music.js` uses the Instagram music catalogue search exposed by ICA. The bundled ICA source does not implement native Direct music-share sending in this version; the adapter returns a clear error instead of falsely sending the track title as text. Native Music DM sharing therefore still requires a supported Instagram Direct music-share endpoint/API implementation and live verification.
+- Set `IG_MODE=instachat` only if you need to temporarily switch back to the previous built-in adapter and set `IG_FORCE_MODE=1` to honor that override.
+
+### Reply-media compatibility patch (2026-11-06)
+- Reply attachment extraction now checks normalized media, quoted/replied raw Instagram payloads,
+  visual-media wrappers, image/video version arrays, and voice-media payloads.
+- When the quoted attachment is not in the live cache, the adapter attempts extraction from
+  the embedded reply payload and then the thread history.
+- `pattu add` still uses the existing GitHub storage configuration and command flow.
+- This is code-level validation only; verify photo/video replies on a real Instagram group chat.

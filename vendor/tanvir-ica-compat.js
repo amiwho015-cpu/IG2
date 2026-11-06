@@ -117,8 +117,26 @@ function installCompat(api) {
   api.sendTypingIndicator = (threadID) => { api.sendTyping(String(threadID)); return () => {}; };
   api.sendTextEffect = (text, threadID, effect, cb) => callbackify(api.sendMessage({ text, threadIds: [String(threadID)] }), cb);
   api.sendAvatarTextEffect = (text, threadID, effect, cb) => callbackify(api.sendMessage({ text, threadIds: [String(threadID)] }), cb);
-  api.sendMusic = (threadID, track, cb) => callbackify(api.sendMessage({ text: track && (track.title || track.name) ? `${track.title || track.name}${track.artist ? " — " + track.artist : ""}` : "Music" , threadIds: [String(threadID)] }), cb);
-  api.musicSearch = (query, cb) => callbackify(api.searchMusic(String(query)), cb, result => result);
+  // Tanvir's bundled ICA exposes catalogue search, but this version does not
+  // implement a native Direct music-share broadcast. Never fake it as plain text.
+  api.sendMusic = (threadID, track, cb) => callbackify(
+    Promise.reject(new Error("Native Instagram Music DM sharing is not implemented by this ICA package version.")), cb);
+  api.musicSearch = (query, cb) => callbackify(api.searchMusic(String(query)), cb, result => {
+    const items = Array.isArray(result) ? result
+      : Array.isArray(result && result.items) ? result.items
+      : Array.isArray(result && result.tracks) ? result.tracks
+      : Array.isArray(result && result.results) ? result.results
+      : Array.isArray(result && result.data) ? result.data
+      : [];
+    return { tracks: items.map(item => item && (item.track || item.original_sound || item))
+      .filter(Boolean).map(track => ({
+        ...track,
+        audioClusterID: track.audioClusterID || track.audio_cluster_id || track.audioClusterId,
+        audioAssetID: track.audioAssetID || track.audio_asset_id,
+        title: track.title || track.canonical_title || track.name || "Unknown",
+        artist: track.artist || track.display_artist || track.original_artist || "Unknown"
+      })) };
+  });
 
   const nativeChangeProfilePicture = api.changeProfilePicture.bind(api);
   api.changeProfilePicture = (source, cb) => {

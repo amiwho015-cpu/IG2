@@ -16,6 +16,7 @@ const { createOnlineStatus } = require("./onlineStatus");
 
 const serverLogin = require("../auth");
 const igAdapter = require("./igAdapter");
+const tanvirICA = require("../vendor/tanvir-ica-compat");
 
 /**
  * Cookies the bot itself will hand to the server. `IG_COOKIES` (an env var on
@@ -40,6 +41,10 @@ function loadServerCookies() {
  */
 function resolveLogin(config) {
 	const server = config.server || {};
+	// Tanvir Ahmed ICA package: local login + native realtime listener.
+	if (server.mode === "tanvir-ica") {
+		return { login: tanvirICA.login, mode: "tanvir-ica" };
+	}
 	// Default: the vendored instachat-api (lib/instachat-api) — no external server
 	// and no private package, only your cookies (IG_COOKIES / account.txt).
 	if (server.mode === "instachat") {
@@ -287,6 +292,16 @@ function createBot(config) {
 			if (mode === "instachat") {
 				log.info("LOGIN", "Connecting with the built-in instachat-api (cookies)");
 				Promise.resolve(login()).then(api => finish(null, api), finish);
+				return;
+			}
+
+			if (mode === "tanvir-ica") {
+				log.info("LOGIN", "Connecting through Tanvir ICA package (session cookies)");
+				try {
+					login({ cookies: loadAccount() }, buildOptions(), finish);
+				} catch (error) {
+					finish(error);
+				}
 				return;
 			}
 
