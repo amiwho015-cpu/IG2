@@ -20,6 +20,9 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(execFile);
 const log = require("./logger");
 
 const TMP = path.join(os.tmpdir(), "instabot-media");
@@ -110,6 +113,36 @@ async function toFile(src, kind) {
 	throw new Error(`media not found: ${src.slice(0, 80)}`);
 }
 
+
+/** Convert downloaded MOV/WebM/other clips to Instagram-friendly H.264/AAC MP4. */
+async function normalizeVideo(file) {
+	let ffmpeg;
+	try { ffmpeg = require("ffmpeg-static"); } catch (_) { return file; }
+	if (!ffmpeg || !fs.existsSync(ffmpeg)) return file;
+	const output = path.join(TMP, `${rand()}_normalized.mp4`);
+	try {
+		await execFileAsync(ffmpeg, [
+			"-y", "-i", file, "-map", "0:v:0", "-map", "0:a?",
+			"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+			"-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+			"-movflags", "+faststart", "-f", "mp4", output
+		], { timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+		if (!fs.existsSync(output) || fs.statSync(output).size < 1024) throw new Error("FFmpeg produced an empty video");
+		return output;
+	} catch (error) {
+		try { fs.unlinkSync(output); } catch (_) {}
+		// A valid MP4 can still be passed through if this host lacks an encoder.
+		const fd = fs.openSync(file, "r");
+		const head = Buffer.alloc(12);
+		try { fs.readSync(fd, head, 0, 12, 0); } finally { fs.closeSync(fd); }
+		if (head.slice(4, 8).toString("ascii") === "ftyp" && path.extname(file).toLowerCase() === ".mp4") {
+			log.warn("MEDIA", `video normalization skipped; using existing MP4: ${error.message}`);
+			return file;
+		}
+		throw new Error(`video conversion failed: ${error.message}`);
+	}
+}
+
 /** Split (src, threadID, ...rest) into caption / callback / reply target. */
 function parseArgs(args) {
 	const [src, threadID, ...rest] = args;
@@ -144,14 +177,19 @@ function install(api) {
 			const { src, threadID, caption, cb, reply } = parseArgs(args);
 			const job = (async () => {
 				const { file, temp } = await toFile(src, kind);
+				let normalized = file;
 				try {
-					const size = fs.statSync(file).size;
+					if (kind === "video") normalized = await normalizeVideo(file);
+					const size = fs.statSync(normalized).size;
 					log.info("MEDIA", `send ${kind} (${Math.round(size / 1024)} KB) -> ${threadID}`);
-					const result = await sendRaw({ body: "", attachment: fs.createReadStream(file) }, threadID, reply);
+					const result = await sendRaw({ body: "", attachment: fs.createReadStream(normalized) }, threadID, reply);
 					if (caption) await sendRaw({ body: String(caption) }, threadID, undefined).catch(() => { });
 					return result;
 				}
-				finally { if (temp) fs.unlink(file, () => { }); }
+				finally {
+					if (normalized !== file) fs.unlink(normalized, () => { });
+					if (temp) fs.unlink(file, () => { });
+				}
 			})();
 			if (cb) {
 				// Callback style: never hand back a rejecting promise (it would be unhandled).
