@@ -110,28 +110,36 @@ module.exports = {
 
 			let title = query, artist = "Unknown Artist", sendAudio;
 
+			let done = false;
 			if (hasIcaSearch(api) && hasIcaVoice(api)) {
-				// ICA route (original Tanvir143 flow)
-				const searchResult = await api.searchMusic(query);
-				const track = getFirstTrack(searchResult);
-				if (!track) throw new Error("No song found.");
-				const audioUrl = findAudioUrl(track) || findAudioUrl(searchResult);
-				if (!audioUrl) throw new Error("First song has no audio URL.");
-				title = track.title || track.name || track.track_name || query;
-				artist = track.artist || track.artists || track.author || track.singer || "Unknown Artist";
+				try {
+					// ICA route (original Tanvir143 flow)
+					const searchResult = await api.searchMusic(query);
+					const track = getFirstTrack(searchResult);
+					if (!track) throw new Error("No song found.");
+					const audioUrl = findAudioUrl(track) || findAudioUrl(searchResult);
+					if (!audioUrl) throw new Error("First song has no audio URL.");
+					title = track.title || track.name || track.track_name || query;
+					artist = track.artist || track.artists || track.author || track.singer || "Unknown Artist";
 
-				let source;
-				if (isM4AUrl(audioUrl)) source = { url: audioUrl };
-				else {
-					await fs.ensureDir(tempDir);
-					const tempFile = path.join(tempDir, `tanvir143-${Date.now()}.m4a`);
-					cleanup.push(tempFile);
-					await downloadM4A(audioUrl, tempFile);
-					source = { path: tempFile };
+					let source;
+					if (isM4AUrl(audioUrl)) source = { url: audioUrl };
+					else {
+						await fs.ensureDir(tempDir);
+						const tempFile = path.join(tempDir, `tanvir143-${Date.now()}.m4a`);
+						cleanup.push(tempFile);
+						await downloadM4A(audioUrl, tempFile);
+						source = { path: tempFile };
+					}
+					sendAudio = () => api.sendVoice({ ...source, threadId: threadID });
+					done = true;
 				}
-				sendAudio = () => api.sendVoice({ ...source, threadId: threadID });
+				catch (e) {
+					// IG2's adapter exposes searchMusic()/sendVoice() as unsupported stubs: use the YouTube route.
+					if (!/not supported|UNSUPPORTED/i.test(`${e && e.code} ${e && e.message}`)) throw e;
+				}
 			}
-			else {
+			if (!done) {
 				// IG2 route: YouTube search + audio attachment
 				const results = await search(query, 3);
 				if (!results || !results.length) throw new Error("No song found.");

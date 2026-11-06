@@ -195,7 +195,10 @@ const handledMessageKeys = new Set();
 function alreadyHandled(event) {
 	if (!event || !event.messageID || (event.type !== "message" && event.type !== "message_reply")) return false;
 	const key = `${event.type}:${event.messageID}`;
-	if (handledMessageKeys.has(key)) return true;
+	if (handledMessageKeys.has(key)) {
+		try { log.warn("DUP", `skipped duplicate ${key} (pid ${process.pid})`); } catch (_) { /* logging only */ }
+		return true;
+	}
 	handledMessageKeys.add(key);
 	if (handledMessageKeys.size > 5000) {
 		const it = handledMessageKeys.values();
@@ -397,7 +400,7 @@ function createBot(config) {
 			handleListenerEvent(error, event);
 		});
 		state.listening = true;
-		log.success("LISTEN", "Realtime listener started");
+		log.success("LISTEN", `Realtime listener started (pid ${process.pid}, host ${require("os").hostname()})`);
 
 		if (state.restartTimer) clearInterval(state.restartTimer);
 		const interval = Number(config.restartListenInterval) || 0;
