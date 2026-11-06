@@ -190,6 +190,19 @@ function firstArray(...candidates) {
 const KNOWN_TYPES = new Set(["message", "message_reply", "message_reaction", "message_unsend", "read_receipt", "typ", "presence",
 	"join", "leave", "ready"]);
 const unknownSeen = new Set();
+// Same message must never run a command twice inside this process (double listener / push+poll overlap).
+const handledMessageKeys = new Set();
+function alreadyHandled(event) {
+	if (!event || !event.messageID || (event.type !== "message" && event.type !== "message_reply")) return false;
+	const key = `${event.type}:${event.messageID}`;
+	if (handledMessageKeys.has(key)) return true;
+	handledMessageKeys.add(key);
+	if (handledMessageKeys.size > 5000) {
+		const it = handledMessageKeys.values();
+		for (let i = 0; i < 1000; i++) handledMessageKeys.delete(it.next().value);
+	}
+	return false;
+}
 
 function createBot(config) {
 	const startedAt = Date.now();
@@ -328,6 +341,8 @@ function createBot(config) {
 		}
 		const event = normalizeEvent(rawEvent);
 		if (!event || event.type === "ready") return;
+
+		if (alreadyHandled(event)) return;
 
 		state.messagesHandled++;
 
