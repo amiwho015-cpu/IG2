@@ -409,7 +409,7 @@ module.exports = {
   sendFile,
   resolveTargetThread,
   loadSource,
-  validateImage,
+  validateImage: normalizeImageToJpeg,
   validateVideoMp4,
   validateVoiceM4a,
   mp4Dimensions,
