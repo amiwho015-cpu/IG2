@@ -273,7 +273,7 @@ const tanvir143Song = {
 
             const infoText =
                 `🎧 Song: ${title}\n` +
-                
+                `🎤 Artist: ${artist}`;
 
             let audioSource;
 

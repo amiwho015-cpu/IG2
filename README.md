@@ -668,3 +668,12 @@ Users, threads and `commands/cache/autoreact.json` are mirrored to a GitHub repo
 3. Start the bot. On boot it pulls the data; changes are pushed ~20s after they happen, and on shutdown.
 
 Never put the token in a public repo.
+
+
+## Tanvir ICA vendor / realtime compatibility note
+
+This build vendors the Tanvir143 `tanvir-mqtt` ICA source under `vendor/tanvir-mqtt/` and retains its original package license and source files. The existing IG2 `src/igAdapter.js` remains the active command compatibility layer so existing IG2 commands, reply handling, media shims, and unsend behavior are not replaced by an incompatible API surface.
+
+`config.json` now sets `instachat.mqtt=true` and `instachat.mqttMode="auto"`. The bundled IG2 realtime client will try its supported realtime transports and retain polling as fallback. This is safer than pinning the `robot` transport when it returns MQTT CONNACK refused.
+
+Important: the vendored Tanvir ICA package is included for staged backend integration, but this candidate does **not** claim that every command has been verified against Tanvir's ICA transport. Instagram may also reject uploads, replies, unsend, or realtime sessions depending on account prompts, rate limits, and server-side API changes. Run the test suite and a controlled account test before production use.
