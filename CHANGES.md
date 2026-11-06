@@ -30,3 +30,4 @@
   reply-target commands) saw no media. listenMqtt now fills repliedToMessage: attachments come from a cache of
   recently seen items, or from the thread history when the replied message is older.
 - api.setMessageReaction no longer calls itself (it used to recurse via the replaced method).
+- Boot log prints "[ICA-COMPAT] v2 loaded" so it is easy to confirm the deployed build includes these fixes.

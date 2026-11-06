@@ -97,6 +97,8 @@ function callbackify(promise, callback, transform) {
 }
 
 function installCompat(api) {
+  // Version marker: if this line is missing from the Render log, the service runs an old build.
+  console.log("[ICA-COMPAT] v2 loaded: media source normalise, reply media bridge, unsend/react fixes");
   const messageThreads = new Map();
   api._userID = String(api.userId || "");
   api.getCurrentUserID = () => String(api.userId || api._userID || "");
