@@ -118,8 +118,8 @@ function loadConfig() {
 	const forced = process.env.IG_FORCE_MODE === "1";
 	// Tanvir ICA is the active local login/realtime transport by default.
 	config.server.mode = forced
-		? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "tanvir-ica"))
-		: "tanvir-ica";
+		? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "instachat"))
+		: "instachat";
 	// instachat-api (vendored in lib/instachat-api): polling + send throttle settings.
 	const ic = config.instachat && typeof config.instachat === "object" ? config.instachat : {};
 	config.instachat = ic;
