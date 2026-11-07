@@ -74,21 +74,14 @@ function hasFtyp(bytes) {
   return bytes.slice(4, 8).toString('ascii') === 'ftyp';
 }
 
-async function normalizeImageToJpeg(bytes, ext) {
+function validateImage(bytes, ext) {
   if (['.jpg', '.jpeg', '.png', '.webp'].indexOf(ext) === -1) {
     throw new Error('tanvir-mqtt: invalid image format (only JPG/JPEG/PNG/WEBP)');
   }
-  if (hasJpegMagic(bytes)) return { bytes, ext: '.jpg' };
-  try {
-    const JimpModule = require('jimp');
-    const Jimp = JimpModule.Jimp || JimpModule;
-    const image = await Jimp.read(bytes);
-    const jpeg = await image.quality(90).getBufferAsync(Jimp.MIME_JPEG || 'image/jpeg');
-    if (!hasJpegMagic(jpeg)) throw new Error('JPEG encoder returned invalid data');
-    return { bytes: jpeg, ext: '.jpg' };
-  } catch (err) {
-    throw new Error('tanvir-mqtt: image conversion failed; install project dependencies (jimp): ' + err.message);
+  if (!hasJpegMagic(bytes)) {
+    throw new Error('tanvir-mqtt: only JPEG passthrough supported without re-encode deps (file is not JPEG)');
   }
+  return true;
 }
 
 function validateVideoMp4(bytes) {
@@ -275,8 +268,8 @@ async function ruploadVoice(client, bytes, upload) {
   const opts = options || {};
   const upload = (deps && deps.upload) || createUploadClient();
   const threadIds = await resolveTargetThread(client, opts, 'photo');
-  const source = await loadSource(opts, deps && deps.httpGet);
-  const { bytes } = await normalizeImageToJpeg(source.bytes, source.ext);
+  const { bytes, ext } = await loadSource(opts, deps && deps.httpGet);
+  validateImage(bytes, ext);
   const mediaId = await ruploadPhoto(client, bytes, upload);
   const token = generateMutationToken();
   const res = await client.api.request({
@@ -409,7 +402,7 @@ module.exports = {
   sendFile,
   resolveTargetThread,
   loadSource,
-  validateImage: normalizeImageToJpeg,
+  validateImage,
   validateVideoMp4,
   validateVoiceM4a,
   mp4Dimensions,

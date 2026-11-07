@@ -40,53 +40,31 @@ async function fetchImage(url) {
 
 const chunk = (list, n) => { const out = []; for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n)); return out; };
 
-// Profiles that getGroup() already received with the member list (name + picture url).
-// Using them means a big group needs ZERO extra Instagram lookups, so Instagram's rate
-// limit can no longer turn every avatar into a "?" and every name into "Member #n".
-const KNOWN = new Map();
-const profileUrl = u => (u && (u.profilePicture || u.profilePicUrl || u.thumbSrc || u.profilePicUrlHd)) || "";
-const profileName = u => (u && (u.name || u.fullName || u.userName || u.username || u.vanity)) || "";
-
 /** Profile pictures + display names for the given ids. Works for big groups (batched). */
 async function loadAvatars(api, ids) {
 	const unique = [...new Set(ids.map(String))];
 	const urls = {};
 	const names = {};
-	for (const id of unique) {
-		const k = KNOWN.get(id);
-		urls[id] = profileUrl(k);
-		names[id] = profileName(k);
-	}
-	// Only ask Instagram about people the member list did not describe; one by one, so a
-	// single failure (or a rate limit) cannot wipe out everybody else.
-	const missing = unique.filter(id => !urls[id] || !names[id]);
-	let lookups = 0;
-	for (const id of missing) {
-		if (lookups >= 25) break;
+	for (const part of chunk(unique, 40)) {
 		try {
-			lookups++;
-			const info = await api.getUserInfo(id);
-			const u = (info && (info[id] || Object.values(info)[0])) || {};
-			if (!urls[id]) urls[id] = profileUrl(u);
-			if (!names[id]) names[id] = profileName(u);
+			const info = await api.getUserInfo(part);
+			for (const id of part) {
+				const u = (info && info[id]) || {};
+				urls[id] = u.profilePicture || u.profilePicUrl || u.thumbSrc || "";
+				names[id] = u.name || u.fullName || u.userName || u.username || "";
+			}
 		}
-		catch (error) {
-			console.error("[gcCard] profile lookup failed:", id, error && error.message);
-			if (/429|rate.?limit|paused/i.test(String(error && error.message))) break;
-		}
+		catch (_) { /* placeholders below */ }
 	}
 	const images = {};
-	// HD pictures need one extra request per person: only for small cards, otherwise the
-	// 150px thumbnail from the member list is used (still a real picture, no rate limit).
-	const wantHd = unique.length <= 12;
 	for (const part of chunk(unique, 20)) await Promise.all(part.map(async id => {
-		if (wantHd) {
-			try {
-				const hd = await require("./hdpic").hdProfilePicture(id, [urls[id]]);
-				if (hd && hd.buffer) { images[id] = await loadImage(hd.buffer); return; }
-			}
-			catch (_) { /* thumbnail below */ }
+		// HD picture from Instagram's private endpoint (cached); the thumbnail from
+		// getUserInfo is only ~150px and looks blurry on the big card.
+		try {
+			const hd = await require("./hdpic").hdProfilePicture(id, [urls[id]]);
+			if (hd && hd.buffer) { images[id] = await loadImage(hd.buffer); return; }
 		}
+		catch (_) { /* thumbnail below */ }
 		images[id] = await fetchImage(urls[id]);
 	}));
 	return { images, names };
@@ -103,10 +81,6 @@ function drawFallback(ctx, x, y, size) {
 
 async function getGroup(api, threadID) {
 	const info = await api.getThreadInfo(threadID);
-	for (const u of (Array.isArray(info.userInfo) ? info.userInfo : [])) {
-		const id = String((u && (u.userID || u.id)) || "");
-		if (id) KNOWN.set(id, u);
-	}
 	const everyone = (info.participantIDs || info.userIDs || []).map(String);
 	const adminIDs = (info.adminIDs || []).map(a => String(a && a.id != null ? a.id : a));
 	return { info, name: info.threadName || info.name || "Unnamed Group", everyone, adminIDs };

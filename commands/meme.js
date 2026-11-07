@@ -21,7 +21,7 @@ async function fromBackup() {
 module.exports = {
   config: {
     name: "meme",
-    aliases: ["memes", "funny"],
+    aliases: ["memes"],
     version: "2.0",
     author: "MahMUD",
     countDown: 10,
