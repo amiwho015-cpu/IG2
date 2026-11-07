@@ -305,7 +305,7 @@ function createFrameCommand({ name, family: familyKey, variant = 1 }) {
 			name,
 			version: "3.0",
 			author: "InstaBOT",
-			role: 2, // bot admins only (config.json adminBot)
+			role: 0,
 			countDown: 5,
 			shortDescription: `${family.title} card with two profile pictures`,
 			category: "LOVE",
