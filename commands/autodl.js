@@ -110,7 +110,7 @@ async function resolveAndDownload(url, dest, audio) {
       const mediaUrl = findMediaUrl(response.data, audio);
       if (!mediaUrl) throw new Error("Downloader API response did not contain a media URL");
       await download(mediaUrl, dest);
-      return response.data;
+      return { data: response.data, mediaUrl };
     } catch (error) {
       lastError = error;
       console.error("[AUTODL] endpoint failed:", endpoint, error.response?.status || error.message);
@@ -142,10 +142,22 @@ module.exports = {
       const audio = platform === "SoundCloud" || platform === "Spotify";
       const dest = path.join(os.tmpdir(), `ig2_autodl_${Date.now()}_${Math.random().toString(36).slice(2)}${audio ? ".mp3" : ".mp4"}`);
       try {
-        await resolveAndDownload(url, dest, audio);
-        await new Promise((resolve, reject) => {
-          api.sendMessage({ body: `✅ ${platform} download complete`, attachment: fs.createReadStream(dest) }, threadID, error => error ? reject(error) : resolve(), messageID);
-        });
+        const resolved = await resolveAndDownload(url, dest, audio);
+        try {
+          await new Promise((resolve, reject) => {
+            api.sendMessage({ body: `✅ ${platform} download complete`, attachment: fs.createReadStream(dest) }, threadID, error => error ? reject(error) : resolve(), messageID);
+          });
+        } catch (sendError) {
+          // The file was downloaded but Instagram refused the upload: never stay silent,
+          // give the direct link instead and show the real reason.
+          console.error("[AUTODL] upload to Instagram failed:", sendError && sendError.message || sendError);
+          const why = String((sendError && sendError.message) || sendError || "upload failed").slice(0, 160);
+          await new Promise(resolve => {
+            try {
+              api.sendMessage(`⚠️ ${platform}: video download hoyeche kintu Instagram-e upload hoyni (${why}).\nDirect link: ${resolved.mediaUrl}`, threadID, () => resolve(), messageID);
+            } catch (_) { resolve(); }
+          });
+        }
       } catch (error) {
         console.error("[AUTODL] failed:", platform, error.response?.status || error.message);
         try { api.sendMessage(`❌ ${platform} download failed: ${error.message || "unsupported/private link"}`, threadID, () => {}, messageID); } catch (_) {}
