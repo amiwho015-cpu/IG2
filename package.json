@@ -16,6 +16,8 @@
   "dependencies": {
     "@distube/ytdl-core": "4.16.12",
     "axios": "^1.7.9",
+    "axios-cookiejar-support": "^7.0.0",
+    "tough-cookie": "^6.0.2",
     "canvas": "^2.11.2",
     "cheerio": "^1.0.0",
     "discord-image-generation": "^1.4.25",
