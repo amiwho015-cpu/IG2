@@ -523,61 +523,16 @@ async function login(params) {
 
 	// ---------- events ----------
 
-
 	function mapAttachments(msg) {
 		const out = [];
-		const seen = new Set();
-		const add = (type, url, extra = {}) => {
-			if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url)) return;
-			const key = `${type}:${url}`;
-			if (seen.has(key)) return;
-			seen.add(key);
-			out.push(Object.assign({ type, url, previewUrl: extra.previewUrl || url }, extra));
-		};
-		const addMedia = media => {
-			if (!media || typeof media !== "object") return;
-			const type0 = String(media.type || "").toLowerCase();
-			const raw = media.raw || media;
-			if (media.url) {
-				const type = /video|clip/.test(type0) ? "video" : /audio|voice/.test(type0) ? "audio" : /image|photo|picture/.test(type0) ? "image" : type0 || "image";
-				add(type, media.url, { previewUrl: media.previewUrl || media.thumbnailUrl || media.url,
-					width: media.width || null, height: media.height || null, duration: media.duration || null });
-			}
-			const candidates = raw.image_versions2 && raw.image_versions2.candidates;
-			if (Array.isArray(candidates) && candidates.length) {
-				const best = candidates.slice().sort((a,b) => ((b.width||0)*(b.height||0))-((a.width||0)*(a.height||0)))[0];
-				add("image", best && best.url, { previewUrl: best && best.url, width: best && best.width, height: best && best.height });
-			}
-			const videos = raw.video_versions || raw.videoVersions;
-			if (Array.isArray(videos) && videos.length) {
-				const best = videos.slice().sort((a,b) => ((b.width||0)*(b.height||0))-((a.width||0)*(a.height||0)))[0];
-				add("video", best && best.url, { previewUrl: (candidates && candidates[0] && candidates[0].url) || null, duration: raw.video_duration || null });
-			}
-			const audio = raw.voice_media && raw.voice_media.media && raw.voice_media.media.audio;
-			if (audio && audio.audio_src) add("audio", audio.audio_src, { duration: audio.duration || null });
-			const voice = raw.voice_media && raw.voice_media.media;
-			if (voice && voice.audio && voice.audio.audio_src) add("audio", voice.audio.audio_src, { duration: voice.audio.duration || null });
-		};
-		if (!msg || typeof msg !== "object") return out;
-		if (msg.media) addMedia(msg.media);
-		if (msg.share && (msg.share.url || msg.share.type)) out.push(Object.assign({ type: "share" }, msg.share, { ID: msg.id }));
-		const raw = msg.raw || msg;
-		// Instagram reply previews can contain the original media under several wrappers.
-		const visit = (node, depth = 0) => {
-			if (!node || typeof node !== "object" || depth > 5) return;
-			if (Array.isArray(node)) { for (const item of node) visit(item, depth + 1); return; }
-			if (node.media && typeof node.media === "object") addMedia(node.media);
-			if (node.visual_media && node.visual_media.media) addMedia(node.visual_media.media);
-			if (node.voice_media) addMedia({ type: "audio", raw: node });
-			if (node.image_versions2 || node.video_versions) addMedia(node);
-			if (Array.isArray(node.attachments)) visit(node.attachments, depth + 1);
-			for (const key of ["replied_to_message", "reply_to_message", "reply_source_message", "quoted_message", "media_share", "carousel_media"]) {
-				if (node[key]) visit(node[key], depth + 1);
-			}
-		};
-		visit(raw);
-		if (!out.length && msg.media) addMedia(msg.media);
-		return out.map(a => Object.assign({ ID: msg.id }, a));
+		if (msg.media && (msg.media.url || msg.media.type)) {
+			const m = msg.media;
+			out.push({ type: m.type || "image", url: m.url || null, previewUrl: m.url || null, width: m.width || null, height: m.height || null, duration: m.duration || null, ID: msg.id });
+		}
+		if (msg.share && (msg.share.url || msg.share.type)) {
+			out.push(Object.assign({ type: "share" }, msg.share, { ID: msg.id }));
+		}
+		return out;
 	}
 
 	function mapMention(msg) {
@@ -602,7 +557,7 @@ async function login(params) {
 			const v = raw[key];
 			if (REPLY_KEY.test(key) && v && typeof v === "object") {
 				const id = v.item_id || v.message_id || v.id || v.client_context;
-				if (id) return { id: str(id), sender: pickSender(v), text: v.text || v.text_body || (v.content && v.content.text_body) || "", raw: v };
+				if (id) return { id: str(id), sender: pickSender(v), text: v.text || v.text_body || (v.content && v.content.text_body) || "" };
 			}
 			if (/^(replied_to_message_id|reply_to_message_id|replied_to_item_id|reply_to_item_id|reply_item_id)$/i.test(key) && (typeof v === "string" || typeof v === "number") && v) {
 				return { id: str(v), sender: str(raw.replied_to_user_id || raw.reply_to_user_id || ""), text: "" };
@@ -617,7 +572,7 @@ async function login(params) {
 
 	function refFromMessage(m) {
 		if (!m) return null;
-		if (m.replyTo && m.replyTo.id) return { id: str(m.replyTo.id), sender: m.replyTo.senderId ? str(m.replyTo.senderId) : pickSender(m.raw && (m.raw.replied_to_message || m.raw.reply_to_message)), text: m.replyTo.text || "", raw: m.raw && (m.raw.replied_to_message || m.raw.reply_to_message) || null, source: "payload" };
+		if (m.replyTo && m.replyTo.id) return { id: str(m.replyTo.id), sender: m.replyTo.senderId ? str(m.replyTo.senderId) : pickSender(m.raw && (m.raw.replied_to_message || m.raw.reply_to_message)), text: m.replyTo.text || "", source: "payload" };
 		const d = deepReplyRef(m.raw);
 		return d ? Object.assign(d, { source: "raw" }) : null;
 	}
@@ -683,7 +638,7 @@ async function login(params) {
 			}
 			catch (_) { /* keep what we have */ }
 		}
-		return { id: rid, sender: sender || "", text, raw: ref.raw || null, source: sender ? source : source + " (sender unknown)" };
+		return { id: rid, sender: sender || "", text, source: sender ? source : source + " (sender unknown)" };
 	}
 
 	function messageEvent(msg, replied) {
@@ -749,17 +704,12 @@ async function login(params) {
 		catch (e) { log.warn("REPLY", `could not resolve reply: ${e.message}`); }
 		if (replied && replied.id) {
 			let atts = attsOf.get(str(replied.id));
-			// Some Instagram reply payloads embed the quoted media itself; extract it
-			// before falling back to thread history (important for older/group media).
-			if (!atts || !atts.length) {
-				const embedded = replied.raw ? mapAttachments({ raw: replied.raw }) : [];
-				if (embedded.length) atts = embedded;
-			}
-			if ((!atts || !atts.length) && (looksLikeCommand(msg.text) || replied.raw)) {
+			if (!atts && looksLikeCommand(msg.text)) {
+				// not seen live (older than the bot's start): read it from the thread history
 				try {
 					const m = await readHistory(msg.threadId, replied.id);
-					if (m) { const historyAtts = mapAttachments(m); if (historyAtts.length) atts = historyAtts; rememberAtts(replied.id, atts || []); }
-				} catch (_) { /* history may not expose expired media */ }
+					if (m) { atts = mapAttachments(m); rememberAtts(replied.id, atts); }
+				} catch (_) { /* no media then */ }
 			}
 			replied.attachments = atts || [];
 		}

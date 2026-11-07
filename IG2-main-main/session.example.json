@@ -1,109 +1,13 @@
 {
-  "uuids": {
-    "advertising_id": "5b4f0c05-c437-4f78-a851-ef737912e1fa",
-    "android_device_id": "android-4cad8d05b6acb5ec",
-    "client_session_id": "4d97bddd-d07c-41f6-a6cc-5ed5dd9b7071",
-    "phone_id": "4a44c541-f50a-4d09-949b-449a0dc2b420",
-    "request_id": "856454d6-6c7e-45e2-9a83-1d3157b3e31f",
-    "tray_session_id": "924c4e88-4026-4042-8110-581e4d548f46",
-    "uuid": "c2c5168e-4b2e-4b4f-b02e-9074c0c9153a"
-  },
-  "mid": "asvyuAABAAF6y4bzD8N4T5Nk7eWN",
+  "uuids": { "uuid": "", "phone_id": "", "android_device_id": "", "advertising_id": "", "client_session_id": "", "request_id": "", "tray_session_id": "" },
+  "mid": "",
   "username": "",
-  "fullName": "",
-  "authorizationData": {
-    "ds_user_id": "75969575970",
-    "sessionid": "75969575970%3AtZRIACnNpkWCLy%3A12%3AAYncDfQMcBS1NOHaA9o4XhumQtj0QypyHFwpTkxcnQ"
-  },
-  "cookieStore": {
-    "version": "tough-cookie@6.0.2",
-    "storeType": "MemoryCookieStore",
-    "rejectPublicSuffixes": true,
-    "enableLooseMode": false,
-    "allowSpecialUseDomain": true,
-    "prefixSecurity": "silent",
-    "cookies": [
-      {
-        "key": "mid",
-        "value": "asvyuAABAAF6y4bzD8N4T5Nk7eWN",
-        "domain": "instagram.com",
-        "path": "/",
-        "secure": true,
-        "httpOnly": true,
-        "hostOnly": false,
-        "creation": "2026-11-06T13:05:19.307Z",
-        "lastAccessed": "2026-11-06T13:05:19.307Z",
-        "sameSite": "none"
-      },
-      {
-        "key": "csrftoken",
-        "value": "vGB0R5dwNRkFZaqvdhRon1ESXKNDqR3h",
-        "domain": "instagram.com",
-        "path": "/",
-        "secure": true,
-        "httpOnly": false,
-        "hostOnly": false,
-        "creation": "2026-11-06T13:05:19.309Z",
-        "lastAccessed": "2026-11-06T13:05:19.309Z",
-        "sameSite": "lax"
-      },
-      {
-        "key": "ds_user_id",
-        "value": "75969575970",
-        "domain": "instagram.com",
-        "path": "/",
-        "secure": true,
-        "httpOnly": false,
-        "hostOnly": false,
-        "creation": "2026-11-06T13:05:19.309Z",
-        "lastAccessed": "2026-11-06T13:05:19.309Z",
-        "sameSite": "none"
-      },
-      {
-        "key": "sessionid",
-        "value": "75969575970%3AtZRIACnNpkWCLy%3A12%3AAYncDfQMcBS1NOHaA9o4XhumQtj0QypyHFwpTkxcnQ",
-        "domain": "instagram.com",
-        "path": "/",
-        "secure": true,
-        "httpOnly": true,
-        "hostOnly": false,
-        "creation": "2026-11-06T13:05:19.309Z",
-        "lastAccessed": "2026-11-06T13:05:19.309Z",
-        "sameSite": "lax"
-      },
-      {
-        "key": "rur",
-        "value": "CCO%2C17841476079116196%2C1795179917%3A01ff8b3d162a4b1632ec2c84aa892a0f33d673ba681990d3f2f3d0b483d233edd9331d09",
-        "domain": "instagram.com",
-        "path": "/",
-        "secure": true,
-        "httpOnly": true,
-        "hostOnly": false,
-        "creation": "2026-11-06T13:05:19.309Z",
-        "lastAccessed": "2026-11-06T13:05:19.309Z",
-        "sameSite": "lax"
-      }
-    ]
-  },
-  "lastLogin": 1793970319309,
-  "deviceSettings": {
-    "android_release": "14",
-    "android_version": 34,
-    "app_version": "448.0.0.0.20",
-    "bloks_versioning_id": "0bc46a03e177bfc9bc8d611918815acf248fa9c77754d807d6a5951dc9ce9432",
-    "cpu": "husky",
-    "device": "husky",
-    "dpi": "480dpi",
-    "manufacturer": "Google/google",
-    "model": "Pixel 8 Pro",
-    "resolution": "1344x2992",
-    "version_code": "1065560286"
-  },
-  "userAgent": "Instagram 448.0.0.0.20 Android (34/14; 480dpi; 1344x2992; Google/google; husky; Pixel 8 Pro; husky; en_US; 1065560286)",
+  "authorizationData": { "ds_user_id": "", "sessionid": "" },
+  "cookieStore": { "cookies": [] },
+  "deviceSettings": {},
+  "userAgent": "",
   "locale": "en_US",
   "country": "US",
-  "countryCode": 1,
-  "timezoneOffset": -14400,
-  "timezoneName": "GMT-04:00",
-  "csrftoken": "vGB0R5dwNRkFZaqvdhRon1ESXKNDqR3h"
+  "timezoneOffset": 0,
+  "csrftoken": ""
 }

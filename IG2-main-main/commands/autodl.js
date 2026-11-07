@@ -1,158 +1,439 @@
-"use strict";
-
 const axios = require("axios");
 const fs = require("fs-extra");
 const path = require("path");
-const os = require("os");
 
-// External downloader services are fallbacks; the bot does not scrape private content.
+// Main endpoint first, alldlv2 as the backup when it fails or has no link.
 const APIS = [
   "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldl",
   "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldlv2"
 ];
-const HOSTS = new Set([
-  "tiktok.com", "facebook.com", "fb.watch", "instagram.com",
-  "youtube.com", "youtu.be", "x.com", "twitter.com", "pin.it",
-  "pinterest.com", "soundcloud.com", "spotify.com", "capcut.com"
-]);
 
-function extractUrls(text) {
-  const matches = String(text || "").match(/https?:\/\/[^\s<>"']+/gi) || [];
-  const out = [];
-  for (let value of matches) {
-    value = value.replace(/[),.!?\]}]+$/g, "");
-    try {
-      const u = new URL(value);
-      const host = u.hostname.toLowerCase().replace(/^www\./, "");
-      const supported = [...HOSTS].some(domain => host === domain || host.endsWith("." + domain));
-      if (supported && !out.includes(u.toString())) out.push(u.toString());
-    } catch (_) {}
+function detectPlatform(url) {
+  const u = url.toLowerCase();
+
+  if (u.includes("tiktok.com")) return "𝙏𝙞𝙠𝙏𝙤𝙠";
+  if (u.includes("facebook.com") || u.includes("fb.watch")) return "𝙁𝙖𝙘𝙚𝙗𝙤𝙤𝙠";
+  if (u.includes("instagram.com")) return "𝙄𝙣𝙨𝙩𝙖𝙜𝙖𝙢";
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "𝙔𝙤𝙪𝙏𝙖𝙗𝙚";
+  if (u.includes("x.com") || u.includes("twitter.com")) return "𝙏𝙬𝙞𝙩𝙩𝙚𝙧 / 𝙓";
+  if (u.includes("pin.it") || u.includes("pinterest.com")) return "𝙋𝙞𝙣𝙩𝙚𝙧𝙚𝙨𝙩";
+  if (u.includes("soundcloud.com")) return "𝙎𝙤𝙪𝙣𝙙𝘾𝙡𝙤𝙪𝙙";
+  if (u.includes("spotify.com")) return "𝙎𝙥𝙤𝙩𝙞𝙛𝙮";
+  if (u.includes("capcut.com")) return "𝘾𝙖𝙥𝘾𝙪𝙩";
+
+  return "𝙐𝙣𝙠𝙣𝙤𝙬𝙣";
+}
+
+function cleanUrl(url) {
+  url = url.trim();
+
+  try {
+    const u = new URL(url);
+
+    if (
+      u.hostname.includes("youtube.com") ||
+      u.hostname.includes("youtu.be")
+    ) {
+      return url;
+    }
+
+    return url.split("?")[0];
+  } catch {
+    return url;
   }
-  return out.slice(0, 2);
 }
 
-function platformOf(url) {
-  const h = new URL(url).hostname.toLowerCase();
-  if (h.includes("tiktok")) return "TikTok";
-  if (h.includes("facebook") || h === "fb.watch") return "Facebook";
-  if (h.includes("instagram")) return "Instagram";
-  if (h.includes("youtube") || h === "youtu.be") return "YouTube";
-  if (h.includes("twitter") || h === "x.com") return "X/Twitter";
-  if (h.includes("pinterest") || h === "pin.it") return "Pinterest";
-  if (h.includes("soundcloud")) return "SoundCloud";
-  if (h.includes("spotify")) return "Spotify";
-  if (h.includes("capcut")) return "CapCut";
-  return "Media";
-}
+function findUrl(obj, wantAudio = false) {
+  if (!obj) return null;
 
-function findMediaUrl(value, audio = false, depth = 0) {
-  if (!value || depth > 9) return null;
-  if (typeof value === "string") return /^https?:\/\//i.test(value) ? value : null;
-  if (Array.isArray(value)) {
-    for (const item of value) { const found = findMediaUrl(item, audio, depth + 1); if (found) return found; }
+  if (typeof obj === "string") {
+    if (
+      obj.startsWith("http://") ||
+      obj.startsWith("https://")
+    ) {
+      return obj;
+    }
+
     return null;
   }
-  if (typeof value !== "object") return null;
-  const keys = audio
-    ? ["audio", "audioUrl", "audio_url", "downloadMp3", "download", "downloadUrl", "url", "link"]
-    : ["video", "videoUrl", "video_url", "play", "playUrl", "download", "downloadUrl", "download_url", "high_quality", "highQuality", "url", "link"];
-  for (const key of keys) if (value[key]) {
-    const found = findMediaUrl(value[key], audio, depth + 1);
-    if (found) return found;
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findUrl(item, wantAudio);
+      if (found) return found;
+    }
+
+    return null;
   }
-  if (Array.isArray(value.formats)) {
-    const formats = value.formats.filter(x => x && typeof x.url === "string");
-    const chosen = audio
-      ? formats.find(x => x.vcodec === "none" || /mp3|m4a|audio/i.test(x.ext || x.format || "")) || formats[0]
-      : formats.find(x => x.vcodec !== "none" && x.acodec !== "none") || formats.find(x => x.vcodec !== "none") || formats[0];
-    if (chosen) return chosen.url;
+
+  if (typeof obj === "object") {
+    const priorityKeys = [
+      "download",
+      "downloadUrl",
+      "download_url",
+      "downloadLink",
+      "download_link",
+      "high_quality",
+      "highQuality",
+      "video",
+      "videoUrl",
+      "video_url",
+      "url",
+      "audio",
+      "audioUrl",
+      "audio_url",
+      "downloadMp3",
+      "originalVideoUrl",
+      "original_video_url"
+    ];
+
+    for (const key of priorityKeys) {
+      if (obj[key]) {
+        const found = findUrl(obj[key], wantAudio);
+        if (found) return found;
+      }
+    }
+
+    if (Array.isArray(obj.formats)) {
+      const usable = obj.formats.filter(x => x && x.url);
+      const isAudioOnly = x => x.vcodec === "none" || x.ext === "mp3" || x.ext === "m4a";
+      const hasVideo = x => x.vcodec !== "none" && x.ext !== "mp3" && x.ext !== "m4a";
+
+      // Audio links (SoundCloud / Spotify) want an audio format; videos (YouTube etc.)
+      // want one with picture AND sound, never an audio-only track sent as .mp4.
+      const pick = wantAudio
+        ? usable.find(isAudioOnly) || usable[0]
+        : usable.find(x => hasVideo(x) && x.acodec !== "none") ||
+          usable.find(hasVideo) ||
+          usable.find(x => !isAudioOnly(x));
+
+      if (pick?.url) {
+        return pick.url;
+      }
+    }
+
+    for (const key of Object.keys(obj)) {
+      const found = findUrl(obj[key], wantAudio);
+      if (found) return found;
+    }
   }
-  for (const [key, item] of Object.entries(value)) {
-    if (["thumbnail", "cover", "avatar", "author", "user"].includes(key.toLowerCase())) continue;
-    const found = findMediaUrl(item, audio, depth + 1);
-    if (found) return found;
-  }
+
   return null;
 }
 
-function extensionFor(url, audio) {
+function extractDownload(data, wantAudio = false) {
+  if (!data) return null;
+
+  return findUrl(data, wantAudio);
+}
+
+function decodeCapCutUrl(url) {
   try {
-    const ext = path.extname(new URL(url).pathname).toLowerCase();
-    if ([".mp4", ".m4v", ".webm", ".mov", ".mp3", ".m4a", ".aac", ".wav"].includes(ext)) return ext;
-  } catch (_) {}
-  return audio ? ".mp3" : ".mp4";
-}
-
-async function download(url, dest) {
-  const response = await axios.get(url, {
-    responseType: "stream", timeout: 120000, maxRedirects: 8,
-    headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36", Accept: "*/*" }
-  });
-  const type = String(response.headers["content-type"] || "").toLowerCase();
-  if (type.includes("text/html")) throw new Error("Downloader returned a webpage instead of media");
-  await new Promise((resolve, reject) => {
-    const writer = fs.createWriteStream(dest);
-    response.data.pipe(writer);
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-    response.data.on("error", reject);
-  });
-  const stat = await fs.stat(dest);
-  if (!stat.size) throw new Error("Downloaded file is empty");
-  if (stat.size > 48 * 1024 * 1024) throw new Error("Media is larger than 48 MB; Instagram upload limit reached");
-}
-
-async function resolveAndDownload(url, dest, audio) {
-  let lastError;
-  for (const endpoint of APIS) {
-    try {
-      const response = await axios.get(endpoint, { params: { url }, timeout: 60000, maxRedirects: 5 });
-      const mediaUrl = findMediaUrl(response.data, audio);
-      if (!mediaUrl) throw new Error("Downloader API response did not contain a media URL");
-      await download(mediaUrl, dest);
-      return response.data;
-    } catch (error) {
-      lastError = error;
-      console.error("[AUTODL] endpoint failed:", endpoint, error.response?.status || error.message);
-      try { await fs.remove(dest); } catch (_) {}
+    if (!url.includes("3bic.com/api/cdn/")) {
+      return null;
     }
+
+    const encoded = url.split("/api/cdn/")[1];
+
+    if (!encoded) return null;
+
+    return Buffer.from(
+      encoded,
+      "base64"
+    ).toString("utf8");
+  } catch {
+    return null;
   }
-  throw lastError || new Error("All downloader services failed");
 }
+
+async function downloadFile(
+  url,
+  filePath,
+  isCapCut = false
+) {
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36",
+    Accept: "*/*"
+  };
+
+  if (isCapCut) {
+    headers.Referer = "https://www.capcut.com/";
+    headers.Origin = "https://www.capcut.com";
+  }
+
+  const response = await axios.get(url, {
+    responseType: "arraybuffer",
+    timeout: 120000,
+    maxRedirects: 10,
+    headers
+  });
+
+  await fs.writeFile(
+    filePath,
+    Buffer.from(response.data)
+  );
+}
+
+const SUPPORTED = [
+  "https://vt.tiktok.com",
+  "https://www.tiktok.com/",
+  "https://vm.tiktok.com",
+
+  "https://www.facebook.com/watch/",
+  "https://www.facebook.com/reel/",
+  "https://www.facebook.com/share/v",
+  "https://www.facebook.com/share/r",
+
+  "https://www.instagram.com/reel/",
+  "https://www.instagram.com/p/",
+
+  "https://youtu.be/",
+  "https://youtube.com/",
+  "https://www.youtube.com/",
+  "https://m.youtube.com/",
+  "https://music.youtube.com/",
+
+  "https://x.com/",
+  "https://twitter.com/",
+
+  "https://pin.it/",
+  "https://www.pinterest.com/",
+
+  "https://soundcloud.com/",
+  "https://open.spotify.com/",
+
+  "https://www.capcut.com/",
+  "https://capcut.com/"
+];
 
 module.exports = {
   config: {
-    name: "autodl", version: "8.0", author: "IG2",
-    role: 0, category: "media",
-    description: { en: "Automatically detects supported media links and downloads them" },
-    guide: { en: "Send a TikTok/Facebook/Instagram/YouTube/X/Pinterest/SoundCloud/Spotify/CapCut link" }
-  },
-  onStart: async function () {},
-  onChat: async function ({ api, event }) {
-    const urls = extractUrls(event && event.body);
-    if (!urls.length) return;
-    const threadID = event.threadID;
-    const messageID = event.messageID;
-    if (!threadID) return;
-
-    try { api.setMessageReaction("⏳", messageID, threadID, () => {}, true); } catch (_) {}
-
-    for (const url of urls) {
-      const platform = platformOf(url);
-      const audio = platform === "SoundCloud" || platform === "Spotify";
-      const dest = path.join(os.tmpdir(), `ig2_autodl_${Date.now()}_${Math.random().toString(36).slice(2)}${audio ? ".mp3" : ".mp4"}`);
-      try {
-        await resolveAndDownload(url, dest, audio);
-        await new Promise((resolve, reject) => {
-          api.sendMessage({ body: `✅ ${platform} download complete`, attachment: fs.createReadStream(dest) }, threadID, error => error ? reject(error) : resolve(), messageID);
-        });
-      } catch (error) {
-        console.error("[AUTODL] failed:", platform, error.response?.status || error.message);
-        try { api.sendMessage(`❌ ${platform} download failed: ${error.message || "unsupported/private link"}`, threadID, () => {}, messageID); } catch (_) {}
-      } finally {
-        try { await fs.remove(dest); } catch (_) {}
-      }
+    name: "autodl",
+    version: "7.0",
+    author: "Toshiro Editz",
+    role: 0,
+    category: "media",
+    description: {
+      en: "Auto download videos and audio from multiple platforms"
+    },
+    guide: {
+      en: "[video/audio link]"
     }
-    try { api.setMessageReaction("✅", messageID, threadID, () => {}, true); } catch (_) {}
+  },
+
+  onStart: async function () {},
+
+  onChat: async function ({
+    api,
+    event
+  }) {
+    const text = event.body || "";
+
+    if (!text.startsWith("http")) {
+      return;
+    }
+
+    if (
+      !SUPPORTED.some(link =>
+        text.startsWith(link)
+      )
+    ) {
+      return;
+    }
+
+    api.setMessageReaction(
+      "🐤",
+      event.messageID,
+      event.threadID,
+      () => {},
+      true
+    );
+
+    const startTime = Date.now();
+
+    try {
+      const targetUrl = cleanUrl(text);
+      const platform = detectPlatform(targetUrl);
+
+      const isAudio =
+        platform === "𝙎𝙤𝙪𝙣𝙙𝘾𝙡𝙤𝙪𝙙" ||
+        platform === "𝙎𝙥𝙤𝙩𝙞𝙛𝙮";
+
+      const isCapCut =
+        platform === "𝘾𝙖𝙥𝘾𝙪𝙩";
+
+      const cacheDir =
+        path.join(__dirname, "cache");
+
+      await fs.ensureDir(cacheDir);
+
+      const filePath = path.join(
+        cacheDir,
+        `autodl_${Date.now()}${
+          isAudio ? ".mp3" : ".mp4"
+        }`
+      );
+
+      let res = null;
+      let downloaded = false;
+      let sawLink = false;
+
+      for (const api_url of APIS) {
+        let current;
+        try {
+          current = await axios.get(
+            api_url + "?url=" + encodeURIComponent(targetUrl),
+            { timeout: 60000 }
+          );
+        } catch (err) {
+          console.error(
+            "AutoDL API failed:",
+            api_url,
+            err.response?.status || err.message
+          );
+          continue;
+        }
+
+        const downloadUrl = extractDownload(current.data, isAudio);
+
+        if (!downloadUrl) {
+          console.error("AutoDL API had no link:", api_url);
+          continue;
+        }
+
+        sawLink = true;
+
+        if (isCapCut) {
+          const decoded = decodeCapCutUrl(downloadUrl);
+
+          if (decoded && decoded.startsWith("http")) {
+            try {
+              await downloadFile(decoded, filePath, true);
+              downloaded = true;
+            } catch (err) {
+              console.error(
+                "CapCut decoded download:",
+                err.response?.status || err.message
+              );
+            }
+          }
+        }
+
+        if (!downloaded) {
+          try {
+            await downloadFile(downloadUrl, filePath, isCapCut);
+            downloaded = true;
+          } catch (err) {
+            console.error(
+              "Direct download:",
+              err.response?.status || err.message
+            );
+          }
+        }
+
+        if (downloaded) {
+          res = current;
+          break;
+        }
+      }
+
+      if (!sawLink) {
+        api.setMessageReaction(
+          "❌",
+          event.messageID,
+          event.threadID,
+          () => {},
+          true
+        );
+
+        return api.sendMessage(
+          "❌ Video not found or unsupported link.",
+          event.threadID
+        );
+      }
+
+      if (!downloaded) {
+        throw new Error(
+          "Unable to download media"
+        );
+      }
+
+      const info =
+        res.data.result?.result ||
+        res.data.result ||
+        res.data;
+
+      const speed = (
+        (Date.now() - startTime) /
+        1000
+      ).toFixed(2);
+
+      const title =
+        info.title ||
+        info.name ||
+        "No Title";
+
+      const author =
+        info.authorName ||
+        info.author ||
+        info.artist ||
+        "Unknown";
+
+      const msg = {
+        attachment:
+          fs.createReadStream(filePath)
+      };
+
+      api.sendMessage(
+        msg,
+        event.threadID,
+        err => {
+          if (err) {
+            console.error(
+              "Upload Error:",
+              err
+            );
+          }
+
+          api.setMessageReaction(
+            err ? "❌" : "✅",
+            event.messageID,
+            event.threadID,
+            () => {},
+            true
+          );
+
+          if (
+            fs.existsSync(filePath)
+          ) {
+            fs.unlinkSync(filePath);
+          }
+        },
+        event.messageID
+      );
+
+    } catch (err) {
+      console.error(
+        "AutoDL Error:",
+        err
+      );
+
+      api.setMessageReaction(
+        "❌",
+        event.messageID,
+        event.threadID,
+        () => {},
+        true
+      );
+
+      api.sendMessage(
+        `❌ Error: ${
+          err.response?.status ||
+          err.message
+        }`,
+        event.threadID
+      );
+    }
   }
 };
