@@ -12,3 +12,7 @@ Dockerfile
 README.md
 
 # Never bake cookies into an image.
+
+# Never bake cookies or sessions into an image.
+session.json
+account.txt
