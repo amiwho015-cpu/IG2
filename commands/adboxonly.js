@@ -7,7 +7,7 @@ module.exports = {
 		version: "2.0",
 		author: "CRX Shihab",
 		countDown: 5,
-		role: 2,
+		role: 1,
 		shortDescription: { en: "Only group admins can use the bot" },
 		category: "box chat",
 		guide: { en: "{pn} on | off\n{pn} noti on | off — notice shown to non-admins" }

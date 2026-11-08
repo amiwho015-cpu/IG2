@@ -258,13 +258,15 @@ function isReplyToNix(event, api, prefix) {
 	// A reply that is really a command ("-help" swiped onto a message) stays a command.
 	for (const p of new Set([prefix, "-", "/"])) if (p && body.startsWith(p)) return false;
 
-	// The sender id is not compared: Instagram reports the bot's own id in different formats,
-	// which made valid swipe-replies fail. The quoted text is what identifies Nix's messages.
+	let botID = null;
+	try { botID = api && typeof api.getCurrentUserID === "function" ? String(api.getCurrentUserID()) : null; }
+	catch (_) { /* no self id available */ }
+	if (replied.senderID && botID && String(replied.senderID) !== botID) return false;
+
 	const quoted = normText(replied.body).slice(0, 60);
+	if (quoted.length < 4) return false;
 	const recent = (threadRec(event.threadID).recent) || [];
-	const hit = quoted.length >= 4 && recent.concat(FIXED_KEYS).some(r => r && (quoted.startsWith(r) || r.startsWith(quoted)));
-	if (!hit) console.log(`[nix] swipe-reply not recognised: sender=${replied.senderID || "-"} quoted="${quoted.slice(0, 40)}"`);
-	return hit;
+	return recent.concat(FIXED_KEYS).some(r => r && (quoted.startsWith(r) || r.startsWith(quoted)));
 }
 
 /* ----------------------------------------------------------------- logic */

@@ -33,17 +33,16 @@
   "noPrefix": false,
   "welcome": {
     "enable": true,
-    "message": "𝐻𝑒𝑦 %1 𝑤𝑒𝑙𝑐𝑜𝑚𝑒 𝑡𝑜 𝑜𝑢𝑟...\n『 %2 』🤍\n𝑇𝑟𝑦 𝑡𝑜 𝑏𝑒 𝑓𝑟𝑖𝑒𝑛𝑑𝑙𝑦...\n𝐴𝑙𝑤𝑎𝑦𝑠 𝑚𝑎𝑖𝑛𝑡𝑎𝑖𝑛 𝑔𝑜𝑜𝑑 𝑏𝑒ℎ𝑎𝑣𝑖𝑜𝑟...\n𝑅𝑒𝑠𝑝𝑒𝑐𝑡 𝑒𝑣𝑒𝑟𝑦 𝑚𝑒𝑚𝑏𝑒𝑟...\n\n𝑊𝑒 ℎ𝑜𝑝𝑒 𝑦𝑜𝑢 𝑤𝑖𝑙𝑙 𝑠𝑡𝑎𝑦 𝑤𝑖𝑡ℎ 𝑢𝑠...\n𝐴𝑠 𝑜𝑢𝑟 𝑡𝑟𝑢𝑠𝑡𝑒𝑑 𝑚𝑒𝑚𝑏𝑒𝑟. 𝑇ℎ𝑎𝑛𝑘 𝑦𝑜𝑢...🖤\n𝐴𝑛𝑑 𝑦𝑜𝑢𝑟 𝑖𝑛𝑡𝑟𝑜…? 🌸🕊️",
+    "message": "Welcome %1 to %2! 👋",
     "threadIDs": [],
     "selfMessage": "Thanks for inviting me to %2 💋. Type {prefix}help to see all available commands.",
     "notes": "Greet members added to a group thread. %1 = the new member, %2 = the thread name. selfMessage is sent when the BOT itself is added ({prefix} = the live prefix, %2 = the group name). Leave threadIDs empty for every thread, or list the thread IDs to limit it. card: picture sent with the text (\"welcard\" or \"welcome\" = toshiro canvas API, false = text only). fallbackScan: also greet members found by watching the member list when Instagram sends no join event.",
     "card": "welcard",
-    "cardOnly": true,
     "fallbackScan": true
   },
   "leave": {
     "enable": true,
-    "message": "%1 miss you bbz 💔",
+    "message": "%1 left %2. 👋",
     "threadIDs": [],
     "notes": "Announce members who leave or are removed from a group thread. %1 = the member, %2 = the thread name. Leave threadIDs empty for every thread."
   },
@@ -113,14 +112,12 @@
     "notes": "Extra options passed to ig-chat-api.login() in direct mode (same values as Insta-Bot3). minRequestInterval (ms) spaces API calls."
   },
   "instachat": {
-    "pollIntervalMs": 500,
-    "idlePollIntervalMs": 500,
+    "pollIntervalMs": 2000,
+    "idlePollIntervalMs": 8000,
     "adaptivePolling": true,
-    "mqtt": true,
-    "mqttMode": "ica",
     "throttle": {
-      "minGapMs": 250,
-      "perThreadGapMs": 400,
+      "minGapMs": 450,
+      "perThreadGapMs": 700,
       "jitterMs": 150
     }
   }

@@ -482,7 +482,6 @@ module.exports = {
 	fetchInstagramProfile,
 	resolveInstagramUserID,
 	resolveUserTarget,
-	cachedHandleForID,
 	resolveProfile,
 	isRateLimitError,
 	_resetUsernameCache() {

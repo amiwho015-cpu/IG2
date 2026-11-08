@@ -138,7 +138,6 @@ module.exports = {
 			const height = Math.max(1500, (singles.length ? singlesTop + singleRows * sRowStep : coupleBottom) + 200);
 			const canvas = createCanvas(width, height);
 			const ctx = canvas.getContext("2d");
-			ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
 
 			const bg = ctx.createLinearGradient(0, 0, width, height);
 			bg.addColorStop(0, "#1b0a2a"); bg.addColorStop(0.5, "#2a0f3a"); bg.addColorStop(1, "#0d1b3a");

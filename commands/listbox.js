@@ -1,7 +1,6 @@
 "use strict";
 
 const { listGroups, joinUser } = require("../src/groupUtil");
-const { leaveVerified } = require("../src/igActions");
 
 const LIMIT = 10;
 
@@ -57,7 +56,7 @@ module.exports = {
 			for (const n of nums) {
 				const g = pick(n);
 				if (!g) { failed.push(`#${n} (no such number)`); continue; }
-				try { await leaveVerified(api, g.threadID); left++; }
+				try { await api.leaveGroup(g.threadID); left++; }
 				catch (error) { failed.push(`#${n} (${(error && (error.error || error.message)) || error})`); }
 			}
 			return message.reply(`✅ Left ${left} group(s).` + (failed.length ? `\n❌ Failed: ${failed.join(", ")}` : ""));
@@ -71,7 +70,6 @@ module.exports = {
 			try {
 				const res = await joinUser(api, uid, g.threadID);
 				if (res.already) return message.reply(`ℹ️ Already in "${label}".`);
-				if (res.unverified) return message.reply(`⚠️ Add request sent to "${label}", but could not confirm it.`);
 				return message.reply(`✅ Added to "${label}".${res.followed ? " (bot followed the account first)" : ""}`);
 			}
 			catch (error) {

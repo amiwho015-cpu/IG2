@@ -9,8 +9,7 @@
  *     "message": "Welcome %1 to %2! 👋",   // %1 = user, %2 = thread name
  *     "selfMessage": "Thanks for inviting me to %2 💋. Type {prefix}help to see all available commands.",
  *     "threadIDs": [],                       // empty = every thread
- *     "card": "welcard",                     // picture: "welcard" | "welcome" | false
- *     "cardOnly": true,                      // true = send only the picture (no text) when the card works
+ *     "card": "welcard",                     // picture sent with the text: "welcard" | "welcome" | false
  *     "fallbackScan": true                   // also notice new members by watching the member list
  *   }
  *
@@ -177,27 +176,16 @@ module.exports = {
 						const t = await resolveUserTarget([String(username).replace(/^@/, "")], null, api).catch(() => null);
 						uid = t && t.id ? String(t.id) : null;
 					}
-					if (!uid) log.warn("JOIN", `welcome card skipped: could not resolve a user id for ${mention}`);
-					else {
-						card = await require("../src/welcomeCard").make({
-							api, threadID, uid, threadsData, username, text,
-							kind: settings.card === "welcome" ? "welcome" : "welcard", timeout: 20000
-						});
-						if (!card) log.warn("JOIN", `welcome card returned nothing for ${mention} (uid ${uid}); sending text only`);
-					}
+					card = await require("../src/welcomeCard").make({
+						api, threadID, uid, threadsData,
+						kind: settings.card === "welcome" ? "welcome" : "welcard", timeout: 20000
+					});
 				}
-				catch (error) {
-					log.warn("JOIN", `welcome card error for ${mention}: ${error && error.message}`);
-					card = null;
-				}
+				catch (_) { card = null; }
 			}
 
 			try {
-				// cardOnly (default): send just the picture, no text. Text is the fallback when no card.
-				if (card && card.file) {
-					if (settings.cardOnly === false) await message.send({ body: text, attachment: fs.createReadStream(card.file) });
-					else await message.send({ attachment: fs.createReadStream(card.file) });
-				}
+				if (card && card.file) await message.send({ body: text, attachment: fs.createReadStream(card.file) });
 				else await message.send(text);
 			}
 			catch (error) {

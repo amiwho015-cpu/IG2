@@ -1,11 +1,4 @@
-- MQTT WebSocket listener fix: `ica` mode is now the configured default; `/ig_message_sync` payloads are decoded (plain JSON and zlib/gzip/deflate variants) and delivered directly to the realtime message parser instead of merely waking polling. Non-message MQTT topics no longer mark the DM stream healthy. A 1.5s safety poll remains while the WebSocket is verified, and normal polling resumes after disconnect.
-- realtime push: Tanvir143 realtime MQTT (raw TLS to edge-mqtt.facebook.com, MQTToT + thrift CONNECT) added as mode `robot`: lib/instachat-api/src/transport/robot-mqtt.js, robot-mqtt-trigger.js, robot-mqttot.js. No extra npm packages. Previously selected by `auto`; this IG2 build now pins `ica` for the requested MQTT-over-WebSocket transport. Test: node test (mock broker) in test/robot-mqtt.test.js.
-
 # Changes in this build
-
-- realtime push: InstaBOT's MQTT-over-WebSocket client (mqtt library, wss://edge-chat.instagram.com/chat, cookie auth, relaxed mqtt-packet flags, endpoint fallback, backoff reconnect, Iris sync) added as a third push mode: lib/instachat-api/src/transport/ica-mqtt.js + ica-mqtt-trigger.js. Needs `mqtt` and `duplexify` (added to package.json -> run `npm install`). `instachat.mqtt: true`, `instachat.mqttMode`: `ica` is selected in this build; `native` and `library` remain optional alternatives. Polling stays as the safety net: it is slowed only after a real push arrives and returns to fast polling when the socket drops. Test: `node --test test/ica-mqtt.test.js`.
-
-- realtime push: native MQTT-over-WebSocket client ported from insta-chat-api (lib/instachat-api/src/transport/ws-mqtt.js, ws-mqtt-trigger.js). Needs only the `ws` package. Enable with `instachat.mqtt: true` in config.json (or IG_MQTT=1); `instachat.mqttMode`: `native` is an optional alternative to the configured `ica` transport. Polling is only slowed after a real push arrives and returns to fast polling if the socket drops.
 
 - autodl: YouTube picks a video+audio format (never audio-only as .mp4); m./music.youtube.com supported; alldl -> alldlv2 backup
 - ytb: toshiro downloader fallback when the remote API list is down

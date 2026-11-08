@@ -6,7 +6,6 @@
  */
 
 const log = require("./logger");
-try { require("./hdCanvas").install(); } catch (_) { /* optional */ }
 const { loadAccount } = require("./config");
 const { createDatabase } = require("./database");
 const { createRegistry, loadAll } = require("./commandLoader");
@@ -16,7 +15,6 @@ const { createOnlineStatus } = require("./onlineStatus");
 
 const serverLogin = require("../auth");
 const igAdapter = require("./igAdapter");
-const tanvirICA = require("../vendor/tanvir-ica-compat");
 
 /**
  * Cookies the bot itself will hand to the server. `IG_COOKIES` (an env var on
@@ -41,10 +39,6 @@ function loadServerCookies() {
  */
 function resolveLogin(config) {
 	const server = config.server || {};
-	// Tanvir Ahmed ICA package: local login + native realtime listener.
-	if (server.mode === "tanvir-ica") {
-		return { login: tanvirICA.login, mode: "tanvir-ica" };
-	}
 	// Default: the vendored instachat-api (lib/instachat-api) — no external server
 	// and no private package, only your cookies (IG_COOKIES / account.txt).
 	if (server.mode === "instachat") {
@@ -195,22 +189,6 @@ function firstArray(...candidates) {
 const KNOWN_TYPES = new Set(["message", "message_reply", "message_reaction", "message_unsend", "read_receipt", "typ", "presence",
 	"join", "leave", "ready"]);
 const unknownSeen = new Set();
-// Same message must never run a command twice inside this process (double listener / push+poll overlap).
-const handledMessageKeys = new Set();
-function alreadyHandled(event) {
-	if (!event || !event.messageID || (event.type !== "message" && event.type !== "message_reply")) return false;
-	const key = `${event.type}:${event.messageID}`;
-	if (handledMessageKeys.has(key)) {
-		try { log.warn("DUP", `skipped duplicate ${key} (pid ${process.pid})`); } catch (_) { /* logging only */ }
-		return true;
-	}
-	handledMessageKeys.add(key);
-	if (handledMessageKeys.size > 5000) {
-		const it = handledMessageKeys.values();
-		for (let i = 0; i < 1000; i++) handledMessageKeys.delete(it.next().value);
-	}
-	return false;
-}
 
 function createBot(config) {
 	const startedAt = Date.now();
@@ -269,7 +247,6 @@ function createBot(config) {
 				try { require("./igUnsend").install(api); } catch (e) { log.warn("UNSEND", `unsend compat failed: ${e.message}`); }
 				try { require("./autoTyping").install(api, config); } catch (_) { /* cosmetic */ }
 				state.api = api;
-				try { require("./hdpic").setResolver(id => api.getHdPictureUrls ? api.getHdPictureUrls(id) : []); } catch (_) { /* optional */ }
 				state.botID = api.getCurrentUserID();
 				dispatcher = createDispatcher({ api, config, registry, database });
 				goatCompat.bind({ api, dispatcher });
@@ -292,16 +269,6 @@ function createBot(config) {
 			if (mode === "instachat") {
 				log.info("LOGIN", "Connecting with the built-in instachat-api (cookies)");
 				Promise.resolve(login()).then(api => finish(null, api), finish);
-				return;
-			}
-
-			if (mode === "tanvir-ica") {
-				log.info("LOGIN", "Connecting through Tanvir ICA package (session cookies)");
-				try {
-					login({ cookies: loadAccount() }, buildOptions(), finish);
-				} catch (error) {
-					finish(error);
-				}
 				return;
 			}
 
@@ -360,8 +327,6 @@ function createBot(config) {
 		const event = normalizeEvent(rawEvent);
 		if (!event || event.type === "ready") return;
 
-		if (alreadyHandled(event)) return;
-
 		state.messagesHandled++;
 
 		if (!KNOWN_TYPES.has(String(event.type)) && !unknownSeen.has(String(event.type))) {
@@ -415,7 +380,7 @@ function createBot(config) {
 			handleListenerEvent(error, event);
 		});
 		state.listening = true;
-		log.success("LISTEN", `Realtime listener started (pid ${process.pid}, host ${require("os").hostname()})`);
+		log.success("LISTEN", "Realtime listener started");
 
 		if (state.restartTimer) clearInterval(state.restartTimer);
 		const interval = Number(config.restartListenInterval) || 0;

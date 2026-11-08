@@ -56,7 +56,7 @@ module.exports = {
     version: "2.2",
     author: "CRX Shihab",
     countDown: 5,
-    role: 2,
+    role: 1,
     description: {
       en: "filter group members by number of messages or locked account"
     },

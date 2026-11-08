@@ -66,7 +66,7 @@ function mapUser(user, fallbackId) {
 		username: u.username || "",
 		profileUrl: u.username ? `https://www.instagram.com/${u.username}/` : "",
 		thumbSrc: u.profilePicUrl || "",
-		profilePicture: u.profilePicUrlHd || u.profilePicUrl || "",
+		profilePicture: u.profilePicUrl || "",
 		biography: u.biography || u.bio || "",
 		followerCount: u.followerCount != null ? u.followerCount : (u.followers != null ? u.followers : undefined),
 		followingCount: u.followingCount != null ? u.followingCount : (u.following != null ? u.following : undefined),
@@ -100,23 +100,15 @@ async function login(params) {
 		cookies: map,
 		userId: map.ds_user_id || map.userid,
 		sessionPath: path.resolve(dataDir, "ig-session.json"),
-		pollIntervalMs: Math.max(300, Number(settings.pollIntervalMs) || 2500),
-		idlePollIntervalMs: Math.max(300, Number(settings.idlePollIntervalMs) || 8000),
+		pollIntervalMs: Math.max(1000, Number(settings.pollIntervalMs) || 2500),
+		idlePollIntervalMs: Math.max(1000, Number(settings.idlePollIntervalMs) || 8000),
 		adaptivePolling: settings.adaptivePolling !== false,
 		throttle: settings.throttle === false ? false : Object.assign({ minGapMs: 450, perThreadGapMs: 700, jitterMs: 150 }, settings.throttle || {}),
 		requestTimeoutMs: Number(settings.requestTimeoutMs) || 20000,
 		maxRetries: settings.maxRetries != null ? Number(settings.maxRetries) : 2,
 		debug: settings.debug === true
 	};
-	// Realtime push (MQTT over WebSocket). Off by default; polling stays as the safety net.
-	if (settings.mqtt != null) clientOptions.mqtt = settings.mqtt;
-	if (settings.mqttMode) clientOptions.mqttMode = settings.mqttMode;
 	if (config.account && config.account.userAgent) clientOptions.userAgent = config.account.userAgent;
-	try {
-		const session = require("./config").loadSessionJson();
-		if (session) clientOptions.mobileSession = session;
-	}
-	catch (_) { /* session.json is optional */ }
 
 	const client = new (ClientClass || InstaChatClient)(clientOptions);
 	const selfListen = config.selfListen !== false;
@@ -139,20 +131,10 @@ async function login(params) {
 		metaOf.set(key, { senderId: senderId ? str(senderId) : prev.senderId, text: text || prev.text || "" });
 		if (metaOf.size > 20000) metaOf.delete(metaOf.keys().next().value);
 	};
-	// messageID -> attachments: so a reply to a photo/video can hand the media to the command
-	// (Instagram's reply payload only carries the quoted message id, never its media).
-	const attsOf = new Map();
-	const rememberAtts = (messageID, list) => {
-		if (!messageID || !Array.isArray(list) || !list.length) return;
-		attsOf.set(str(messageID), list);
-		if (attsOf.size > 3000) attsOf.delete(attsOf.keys().next().value);
-	};
 	const sentByBot = new Set();
-	const rememberSent = (id, threadID) => {
+	const rememberSent = id => {
 		if (!id) return;
 		sentByBot.add(str(id));
-		// Make the poller check this thread for reactions quickly (react-to-unsend needs it).
-		try { if (client.realtime && client.realtime.watchReactionMessage) client.realtime.watchReactionMessage(str(threadID || threadOf.get(str(id)) || ""), str(id)); } catch (_) { /* optional */ }
 		if (sentByBot.size > 5000) sentByBot.delete(sentByBot.values().next().value);
 	};
 	const resolveThread = (messageID, threadID) => {
@@ -178,17 +160,17 @@ async function login(params) {
 	function toResult(res, threadID, sentText) {
 		lastBotSendAt.set(str(threadID), Date.now());
 		const id = res && (res.id || res.messageID || res.messageId || res.item_id);
-		if (id) { remember(id, threadID); rememberSent(id, threadID); rememberMeta(id, client.userId, sentText || ""); }
+		if (id) { remember(id, threadID); rememberSent(id); rememberMeta(id, client.userId, sentText || ""); }
 		const out = { threadID: str(threadID), messageID: id ? str(id) : null, timestamp: (res && res.timestamp) || Date.now() };
 		if (res && Array.isArray(res.attachments) && res.attachments.length) out.attachments = res.attachments;
 		if (res && res.textMessage) {
 			const tid = res.textMessage.id || res.textMessage.messageID;
-			if (tid) { remember(tid, threadID); rememberSent(tid, threadID); }
+			if (tid) { remember(tid, threadID); rememberSent(tid); }
 		}
 		if (res && Array.isArray(res.attachmentMessages)) {
 			for (const m of res.attachmentMessages) {
 				const aid = m && (m.id || m.messageID);
-				if (aid) { remember(aid, threadID); rememberSent(aid, threadID); }
+				if (aid) { remember(aid, threadID); rememberSent(aid); }
 			}
 		}
 		return out;
@@ -212,7 +194,6 @@ async function login(params) {
 					payload.mentions = Object.entries(mentions).map(([userId, username]) => ({ userId, username }));
 				}
 			}
-			try { log.info("SEND", `pid ${process.pid} thread ${tid} ${reply ? "reply" : "send"}: ${String(typeof payload === "string" ? payload : (payload && payload.body) || (payload && payload.attachments ? "[attachment]" : "")).slice(0, 40)}`); } catch (_) { /* log only */ }
 			const res = reply
 				? await client.reply(tid, reply, payload)
 				: await client.sendMessage(tid, payload);
@@ -342,30 +323,6 @@ async function login(params) {
 		}, cb);
 	};
 
-	// HD profile picture URLs (largest first) through the bot's own authenticated session -
-	// the same transport the rest of the bot already uses, so it works whenever the bot works.
-	api.getHdPictureUrls = async function getHdPictureUrls(userID) {
-		const id = str(userID).replace(/^@/, "");
-		if (!/^\d+$/.test(id) || Date.now() < lookupBlockedUntil) return [];
-		const { Endpoints } = require("../lib/instachat-api/src");
-		let res;
-		try { res = await client.transport.get(Endpoints.USER_INFO(id), { maxRetries: 0 }); }
-		catch (error) {
-			if (isRateLimited(error)) { lookupBlockedUntil = Date.now() + 30000; return []; }
-			try { res = await client.transport.get(Endpoints.USER_INFO_WEB(id), { maxRetries: 0 }); }
-			catch (_) { return []; }
-		}
-		const body = (res && res.data) || {};
-		const u = body.user || (body.data && body.data.user);
-		if (!u) return [];
-		const versions = Array.isArray(u.hd_profile_pic_versions) ? u.hd_profile_pic_versions : [];
-		return [
-			u.hd_profile_pic_url_info && u.hd_profile_pic_url_info.url,
-			...versions.slice().sort((a, b) => (b.width || 0) - (a.width || 0)).map(v => v && v.url),
-			u.profile_pic_url_hd, u.profile_pic_url
-		].filter(Boolean);
-	};
-
 	api.getDiagnostics = () => ({
 		username: client.username || null,
 		userId: str(client.userId),
@@ -458,13 +415,10 @@ async function login(params) {
 
 	// ---------- group management ----------
 
-	// getThreadInfo is cached for 45s: drop the entry whenever membership changes (or the caller
-	// needs a fresh member list) so "is X in the group now?" never reads stale data.
-	api.invalidateThread = threadID => { try { threadCache.delete(str(threadID)); } catch (_) { /* ignore */ } };
 	const addUsers = (userID, threadID, ...rest) => bridge(
-		async () => { try { return await client.addParticipants(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)); } finally { api.invalidateThread(threadID); } }, findCb(...rest));
+		() => client.addParticipants(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)), findCb(...rest));
 	const removeUsers = (userID, threadID, ...rest) => bridge(
-		async () => { try { return await client.removeParticipant(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)); } finally { api.invalidateThread(threadID); } }, findCb(...rest));
+		() => client.removeParticipant(str(threadID), (Array.isArray(userID) ? userID : [userID]).map(str)), findCb(...rest));
 
 	api.addUserToGroup = api.addUserToThread = addUsers;
 	api.removeUserFromGroup = api.removeUserFromThread = removeUsers;
@@ -482,7 +436,7 @@ async function login(params) {
 
 	api.follow = api.followUser = (userID, ...rest) => bridge(() => client.followUser(str(userID)), findCb(...rest));
 	api.unfollow = api.unfollowUser = (userID, ...rest) => bridge(() => client.unfollowUser(str(userID)), findCb(...rest));
-	api.leaveThread = api.leaveGroup = (threadID, ...rest) => bridge(async () => { try { return await client.leaveThread(str(threadID)); } finally { api.invalidateThread(threadID); } }, findCb(...rest));
+	api.leaveThread = api.leaveGroup = (threadID, ...rest) => bridge(() => client.leaveThread(str(threadID)), findCb(...rest));
 	api.deleteThread = (threadID, ...rest) => bridge(() => client.deleteThread(str(threadID)), findCb(...rest));
 
 	// Things the Instagram web API cannot do: fail clearly instead of silently.
@@ -660,7 +614,7 @@ async function login(params) {
 				messageID: replied.id,
 				senderID: replied.sender,
 				body: replied.text,
-				attachments: Array.isArray(replied.attachments) ? replied.attachments : [],
+				attachments: [],
 				timestamp: null
 			};
 		}
@@ -675,21 +629,10 @@ async function login(params) {
 		}
 	};
 
-	const liveThreads = new Set();
-	const BOOT_AT = Date.now();
 	client.on(Events.MESSAGE, async msg => {
 		if (!msg) return;
-		// Never act on chat history: the first message we see in a thread (e.g. right after being added
-		// to a group chat) must be fresh, and nothing from before the bot started is processed.
-		const tid = str(msg.threadId);
-		if (!liveThreads.has(tid)) {
-			const ts = Number(msg.timestamp) || 0;
-			if (ts && (ts < BOOT_AT - 3000 || ts < Date.now() - 15000)) { remember(msg.id, msg.threadId); return; }
-			liveThreads.add(tid);
-		}
 		remember(msg.id, msg.threadId);
 		rememberMeta(msg.id, msg.isSelf ? client.userId : msg.senderId, msg.text || "");
-		rememberAtts(msg.id, mapAttachments(msg));
 		if (msg.isSelf) {
 			// Our own sends come back through polling; give send() a moment to register the id,
 			// then only deliver messages typed from another device (and only with selfListen).
@@ -702,17 +645,6 @@ async function login(params) {
 			if (ref) replied = await resolveReplySender(msg, ref);
 		}
 		catch (e) { log.warn("REPLY", `could not resolve reply: ${e.message}`); }
-		if (replied && replied.id) {
-			let atts = attsOf.get(str(replied.id));
-			if (!atts && looksLikeCommand(msg.text)) {
-				// not seen live (older than the bot's start): read it from the thread history
-				try {
-					const m = await readHistory(msg.threadId, replied.id);
-					if (m) { atts = mapAttachments(m); rememberAtts(replied.id, atts); }
-				} catch (_) { /* no media then */ }
-			}
-			replied.attachments = atts || [];
-		}
 		emitToListeners(null, messageEvent(msg, replied));
 	});
 

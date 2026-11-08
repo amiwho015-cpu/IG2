@@ -7,7 +7,7 @@ module.exports = {
 		version: "2.0",
 		author: "CRX Shihab",
 		countDown: 5,
-		role: 2,
+		role: 1,
 		shortDescription: { en: "Edit the welcome message of this group" },
 		category: "box chat",
 		guide: {

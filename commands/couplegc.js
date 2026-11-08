@@ -129,7 +129,7 @@ module.exports = {
 			const members = rest.slice(0, MAX_MEMBERS);
 			const avatars = await loadAvatars(api, [leftId, rightId, ...members]);
 
-			const width = 3200, size = 240, spacing = 40, rowStep = size + spacing + 30, perRow = 10;
+			const width = 3200, size = 180, spacing = 40, rowStep = size + spacing + 30, perRow = 10;
 			const gridWidth = perRow * (size + spacing) - spacing;
 			const gridX = Math.round((width - gridWidth) / 2);
 			const gridTop = 1480;
@@ -137,7 +137,6 @@ module.exports = {
 			const height = Math.max(1900, gridTop + rows * rowStep + 220);
 			const canvas = createCanvas(width, height);
 			const ctx = canvas.getContext("2d");
-			ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
 
 			// background
 			const bg = ctx.createLinearGradient(0, 0, width, height);

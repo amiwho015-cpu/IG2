@@ -1,6 +1,6 @@
 "use strict";
 
-const { errText, leaveVerified } = require("../src/igActions");
+const { errText } = require("../src/igActions");
 
 module.exports = {
 	config: {
@@ -9,7 +9,7 @@ module.exports = {
 		version: "3.0",
 		author: "CRX Shihab",
 		countDown: 5,
-		role: 2,
+		role: 1,
 		shortDescription: "Bot will leave group",
 		longDescription: "Bot says goodbye and leaves this group, or the group with the given thread id (bot admin only).",
 		category: "BOX CHAT",
@@ -32,7 +32,7 @@ module.exports = {
 		catch (_) { /* goodbye is optional, leaving is not */ }
 
 		try {
-			await leaveVerified(api, id);
+			await api.leaveGroup(id);
 			if (other) return message.reply(`✅ Left group ${id}.`);
 		}
 		catch (error) {

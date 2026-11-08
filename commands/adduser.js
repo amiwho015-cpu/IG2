@@ -50,7 +50,6 @@ module.exports = {
 			try {
 				const res = await joinUser(api, t.id, event.threadID);
 				if (res.already) lines.push(`ℹ️ ${t.label}: age thekei group e ache.`);
-				else if (res.unverified) lines.push(`⚠️ ${t.label}: add request pathano hoyeche, kintu group e dhukse kina check kora gelo na.`);
 				else lines.push(`✅ ${t.label}: group e add kora hoyeche${res.followed ? " (bot follow kore add korse)" : ""}.`);
 			}
 			catch (error) {

@@ -6,7 +6,7 @@
  * Configure in config.json:
  *   "leave": {
  *     "enable": true,
- *     "message": "%1 miss you bbz 💔",   // %1 = user, %2 = thread name
+ *     "message": "%1 left %2. 👋",   // %1 = user, %2 = thread name
  *     "threadIDs": []                 // empty = every thread
  *   }
  *
@@ -75,7 +75,7 @@ module.exports = {
 
 		if (thread.data && thread.data.leaveOff === true) return;
 		const custom = thread.data && thread.data.leaveMessage;
-		const template = (custom || settings.message || "%1 miss you bbz 💔")
+		const template = (custom || settings.message || "%1 left %2. 👋")
 			.replace(/\{userName(Tag)?\}/gi, "%1").replace(/\{boxName\}/gi, "%2");
 		const seen = new Set();
 

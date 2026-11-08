@@ -30,7 +30,7 @@ module.exports = {
 		version: "1.0",
 		author: "CRX Shihab",
 		countDown: 3,
-		role: 2,
+		role: 1,
 		shortDescription: { en: "Reply to stickers with a sticker" },
 		longDescription: { en: "When a member sends a sticker or GIF, the bot sends it back." },
 		category: "BOX CHAT",

@@ -263,27 +263,6 @@ function buildPrompt({ rec, text, day, language }) {
 const normText = text => String(text || "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
 const FIXED_KEYS = [...Object.values(ASK), ...Object.values(FAIL)].map(t => normText(t).slice(0, 60)).filter(k => k.length >= 4);
 
-// Ids of the messages Shihab sent: a swipe-reply to one of them is recognised by id even when
-// Instagram does not hand over the quoted text.
-const SENT_IDS = new Set();
-function rememberSent(res) {
-	try {
-		const list = Array.isArray(res) ? res : [res];
-		for (const r of list) {
-			const id = r && (r.messageID || r.messageId || r.id || r.itemId || (r.message && (r.message.id || r.message.messageID)));
-			if (id) SENT_IDS.add(String(id));
-		}
-		while (SENT_IDS.size > 300) SENT_IDS.delete(SENT_IDS.values().next().value);
-	}
-	catch (_) { /* ignore */ }
-}
-/** message.reply that also remembers the id of what was sent. */
-async function say(message, text) {
-	const res = await message.reply(text);
-	rememberSent(res);
-	return res;
-}
-
 function rememberReply(reply) {
 	const mem = load();
 	const key = normText(reply).slice(0, 60);
@@ -300,15 +279,14 @@ function isReplyToShihab(event, api, prefix) {
 	if (!body) return false;
 	for (const p of new Set([prefix, "-", "/"])) if (p && body.startsWith(p)) return false;
 
-	// 1) by id: the quoted message is one Shihab sent
-	if (replied.messageID && SENT_IDS.has(String(replied.messageID))) return true;
+	let botID = null;
+	try { botID = api && typeof api.getCurrentUserID === "function" ? String(api.getCurrentUserID()) : null; }
+	catch (_) { /* no self id available */ }
+	if (replied.senderID && botID && String(replied.senderID) !== botID) return false;
 
-	// 2) by text: the quoted text is one of Shihab's replies. The sender id is not compared any
-	//    more: Instagram reports the bot's own id in different formats, which made this fail.
 	const quoted = normText(replied.body).slice(0, 60);
-	const hit = quoted.length >= 4 && load().recent.concat(FIXED_KEYS).some(r => r && (quoted.startsWith(r) || r.startsWith(quoted)));
-	if (!hit) console.log(`[shihab] swipe-reply not recognised: quotedId=${replied.messageID || "-"} sender=${replied.senderID || "-"} quoted="${quoted.slice(0, 40)}"`);
-	return hit;
+	if (quoted.length < 4) return false;
+	return load().recent.concat(FIXED_KEYS).some(r => r && (quoted.startsWith(r) || r.startsWith(quoted)));
 }
 
 /* ------------------------------------------- fixed answers: owner and "what do you do" */
@@ -450,10 +428,10 @@ async function sendCanned({ kind, rec, text, message }) {
 	rec.history.push({ r: "u", t: shorten(text, 200) }, { r: "s", t: kind === "owner" ? "(I shared the owner info)" : "(I told what I do)" });
 	if (rec.history.length > HISTORY_KEPT) rec.history.splice(0, rec.history.length - HISTORY_KEPT);
 	save();
-	rememberSent(await message.reply(parts[0]));
+	await message.reply(parts[0]);
 	for (const part of parts.slice(1)) {
 		await sleep(900);
-		rememberSent(await (typeof message.send === "function" ? message.send(part) : message.reply(part)));
+		await (typeof message.send === "function" ? message.send(part) : message.reply(part));
 	}
 }
 
@@ -683,7 +661,7 @@ async function chat({ ctx, event, message, usersData, text }) {
 	catch (error) {
 		console.error("[shihab] API error:", error.message);
 		save();
-		return say(message, tag + (FAIL[language] || FAIL.banglish));
+		return message.reply(tag + (FAIL[language] || FAIL.banglish));
 	}
 	reply = reply.replace(/^\s*shihab\s*[:：-]\s*/i, "").replace(/^\s*@\S+\s*[,:]?\s*/, "").trim().slice(0, 900);
 	if (!reply) return;
@@ -701,7 +679,7 @@ async function chat({ ctx, event, message, usersData, text }) {
 	rememberReply(reply);
 	save();
 
-	return say(message, reply);
+	return message.reply(reply);
 }
 
 function describe(uid) {
@@ -766,7 +744,7 @@ module.exports = {
 		}
 
 		const text = args.join(" ").trim();
-		if (!text) return say(message, ASK[lang.detect(text)] || ASK.banglish);
+		if (!text) return message.reply(ASK[lang.detect(text)] || ASK.banglish);
 		return chat({ ctx, event, message, usersData, text });
 	},
 
@@ -782,7 +760,7 @@ module.exports = {
 		const m = body.match(/^\s*(?:shihab|শিহাব|शिहाब)(?=[\s,:!.\-–—]|$)[\s,:!.\-–—]*([\s\S]*)$/i);
 		if (m) {
 			const text = m[1].trim();
-			if (!text) return say(message, ASK.banglish);
+			if (!text) return message.reply(ASK.banglish);
 			return chat({ ctx, event, message, usersData, text });
 		}
 

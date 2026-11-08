@@ -16,7 +16,7 @@ module.exports = {
     version: "2.3",
     author: "CRX Shihab",
     countDown: 5,
-    role: 2,
+    role: 1,
     shortDescription: { en: "Auto react to messages in group" },
     longDescription: { en: "Auto react to specific words in messages" },
     category: "BOX CHAT",

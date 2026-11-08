@@ -2,18 +2,11 @@
 
 /**
  * onReaction — runs for reaction events.
- * Removes a bot message when anyone reacts to it with 😡 😠 👎 🗑️ (works in every GC and DM).
- * Instagram only lets an account unsend its OWN messages, so reacting to someone else's
- * message is ignored.
+ * Removes a bot message when someone reacts to it with 😡 😠 👎 🗑️ (works in every GC).
+ * Author: Saifullah Al Neoaz (https://github.com/lazyneoaz)
  */
 
 const log = require("../src/logger");
-
-// Strip variation selectors / skin tones so "👎🏽" and "🗑️" match the plain emoji.
-const normalize = emoji => String(emoji || "")
-	.replace(/[\uFE0E\uFE0F]/g, "")
-	.replace(/\u{1F3FB}|\u{1F3FC}|\u{1F3FD}|\u{1F3FE}|\u{1F3FF}/gu, "");
-const REMOVE = new Set(["😡", "😠", "👎", "🗑"]);
 
 module.exports = {
 	config: {
@@ -22,27 +15,23 @@ module.exports = {
 		eventType: "message_reaction"
 	},
 
-	onEvent: async function ({ api, event }) {
-		if (!REMOVE.has(normalize(event.reaction))) return;
+	onEvent: async function ({ event, message, config }) {
+		// Any member of any chat (GC or DM) can remove a BOT message by reacting with an
+		// angry / thumbs-down / trash emoji. Instagram only lets an account unsend its own
+		// messages, so reacting to someone else's message is simply ignored.
+		const REMOVE = ["😡", "😠", "👎", "🗑️", "🗑"];
+		if (!REMOVE.includes(event.reaction)) return;
 
 		const senderID = String(event.senderID || event.userID || "");
 		const botID = String((global.GoatBot && global.GoatBot.botID) || "");
 		if (botID && senderID === botID) return; // the bot's own reaction
 
-		const messageID = event.messageID;
-		const threadID = event.threadID;
-		if (!messageID) return;
-
-		// One fast attempt straight at Instagram (no multi-shape retries with sleeps).
-		const unsend = typeof api.__rawUnsend === "function" ? api.__rawUnsend : api.unsendMessage.bind(api);
 		try {
-			await new Promise((resolve, reject) =>
-				unsend(messageID, threadID, (error, result) => error ? reject(error) : resolve(result)));
-			log.info("REACTION", `${senderID} removed message ${messageID} in ${threadID}`);
+			await message.unsend(event.messageID);
+			log.info("REACTION", `${senderID} removed message ${event.messageID} in ${event.threadID}`);
 		}
 		catch (error) {
-			// Not the bot's message (or already gone): quietly ignore.
-			log.warn("REACTION", `Could not remove ${messageID}: ${(error && error.message) || error}`);
+			log.warn("REACTION", `Could not remove ${event.messageID}: ${error.message}`);
 		}
 	}
 };

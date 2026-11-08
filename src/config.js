@@ -114,21 +114,15 @@ function loadConfig() {
 	// Only IG_FORCE_MODE=1 lets IG_MODE (or config.server.mode) pick "direct" / "server".
 	const modeEnv = process.env.IG_MODE && process.env.IG_MODE.trim().toLowerCase();
 	const fileMode = String(config.server.mode || "").toLowerCase();
-	const validModes = ["instachat", "tanvir-ica", "direct", "server"];
+	const validModes = ["instachat", "direct", "server"];
 	const forced = process.env.IG_FORCE_MODE === "1";
-	// Tanvir ICA is the active local login/realtime transport by default.
-	config.server.mode = forced
-		? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "instachat"))
-		: "instachat";
+	config.server.mode = forced ? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "instachat")) : "instachat";
 	// instachat-api (vendored in lib/instachat-api): polling + send throttle settings.
 	const ic = config.instachat && typeof config.instachat === "object" ? config.instachat : {};
 	config.instachat = ic;
-	if (!(Number(ic.pollIntervalMs) >= 300)) ic.pollIntervalMs = 2500;
-	if (!(Number(ic.idlePollIntervalMs) >= 300)) ic.idlePollIntervalMs = 8000;
+	if (!(Number(ic.pollIntervalMs) >= 1000)) ic.pollIntervalMs = 2500;
+	if (!(Number(ic.idlePollIntervalMs) >= 1000)) ic.idlePollIntervalMs = 8000;
 	if (ic.adaptivePolling == null) ic.adaptivePolling = true;
-	// Realtime push (MQTT over WebSocket): off unless enabled; mode ica|native|library|auto.
-	if (ic.mqtt == null) ic.mqtt = false;
-	if (!ic.mqttMode) ic.mqttMode = "ica";
 	if (ic.throttle !== false) {
 		ic.throttle = ic.throttle && typeof ic.throttle === "object" ? ic.throttle : {};
 		if (ic.throttle.minGapMs == null) ic.throttle.minGapMs = 450;
@@ -250,70 +244,14 @@ function parseAccountText(rawText) {
 	return cookies;
 }
 
-function sessionJsonPath() {
-	return process.env.IG_SESSION_PATH ? path.resolve(process.env.IG_SESSION_PATH) : path.join(ROOT, "session.json");
-}
-
-/**
- * The full Instagram Session JSON (exported with the SESSION-JSON-COOKIES extension) kept as a file
- * in the project root, like Tanvir143's robot. Returns null when the file is missing or unreadable.
- */
-function loadSessionJson() {
-	// Railway: paste the complete Session JSON into the SESSION_JSON variable.
-	// The environment variable takes priority over the optional local session.json file.
-	const fromEnv = process.env.SESSION_JSON && process.env.SESSION_JSON.trim();
-	try {
-		const raw = fromEnv || (fs.existsSync(sessionJsonPath()) ? fs.readFileSync(sessionJsonPath(), "utf8") : "");
-		if (!raw) return null;
-		const parsed = JSON.parse(raw);
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-	}
-	catch (error) {
-		if (fromEnv) throw new Error(`SESSION_JSON is invalid JSON: ${error.message}`);
-		return null;
-	}
-}
-
-/** Cookie list from a Session JSON (cookieStore + authorizationData + csrftoken + mid). */
-function sessionToCookies(session) {
-	const out = [];
-	const seen = new Set();
-	const add = (key, value, domain, p) => {
-		if (!key || value === undefined || value === null || value === "" || seen.has(key)) return;
-		seen.add(key);
-		out.push({ key, value: String(value), domain: domain || "instagram.com", path: p || "/" });
-	};
-	const store = session && session.cookieStore && Array.isArray(session.cookieStore.cookies) ? session.cookieStore.cookies : [];
-	for (const c of store) if (c) add(c.key || c.name, c.value, c.domain, c.path);
-	const auth = (session && session.authorizationData) || {};
-	add("sessionid", auth.sessionid);
-	add("ds_user_id", auth.ds_user_id);
-	add("csrftoken", session && session.csrftoken);
-	add("mid", session && session.mid);
-	return out;
-}
-
 function loadAccount() {
-	// 1) IG_COOKIES env var, 2) SESSION_JSON env var / session.json file, 3) account.txt.
+	// IG_COOKIES (env var, e.g. on Railway/Render) wins over account.txt.
 	const fromEnv = process.env.IG_COOKIES && process.env.IG_COOKIES.trim();
-	if (!fromEnv) {
-		const session = loadSessionJson();
-		if (session) {
-			const cookies = sessionToCookies(session);
-			const has = key => cookies.some(cookie => cookie.key === key);
-			if (has("sessionid") && has("ds_user_id")) return cookies;
-		}
-	}
-	if (!fromEnv && !fs.existsSync(accountPathFor())) {
-		// Safe diagnostics: never print the value, only whether the variable reached the process.
-		const sj = process.env.SESSION_JSON;
-		const diag = sj === undefined ? "SESSION_JSON: not set in this process"
-			: `SESSION_JSON: set, length ${sj.length}, starts with "${sj.trim().charAt(0)}", ends with "${sj.trim().slice(-1)}"`;
+	if (!fromEnv && !fs.existsSync(accountPathFor()))
 		throw new Error(
 			"No Instagram cookies found. Set the IG_COOKIES environment variable, or copy account.example.txt to account.txt and paste your cookies. " +
-			"account.txt is git-ignored, so your cookies are never committed. [" + diag + "]"
+			"account.txt is git-ignored, so your cookies are never committed."
 		);
-	}
 	return parseAccountText(fromEnv || fs.readFileSync(accountPathFor(), "utf8"));
 }
 
@@ -326,8 +264,6 @@ module.exports = {
 	loadConfig,
 	saveConfig,
 	loadAccount,
-	loadSessionJson,
-	sessionToCookies,
 	normalizeCookies,
 	netScapeToCookies,
 	cookieHeaderToCookies,

@@ -53,49 +53,6 @@ function createDispatcher({ api, config, registry, database }) {
 		return ROLE_USER;
 	}
 
-
-	// ---- Boss protection -------------------------------------------------
-	// Fun / "attack" commands (latti, kill, slap, rip ...) must not be used on a bot
-	// admin. If anyone else targets one, the command is refused with a message.
-	const BOSS_PROTECTED = new Set([
-		"latti", "latti2", "latti3", "latti4", "latti5", "kill", "rip", "slap", "punch", "arrest",
-		"kidnap", "squeeze", "batslap", "shoot", "shoot2", "shoot3", "shoot4", "shoot5", "jail",
-		"juta", "chor", "toilet", "trash", "clown", "donkey", "cow", "dog", "dog2", "wanted",
-		"findgay", "gorib", "sanda", "murgi", "horny", "hack", "cdi", "gu"
-	]);
-	const BOSS_TEXT = "🚫 Amr boss er shate biyadopi styles kore! Onno gula use korte paro 😤";
-
-	async function targetsBotAdmin(event, args) {
-		const admins = (config.adminBot || []).map(String);
-		if (!admins.length) return false;
-		const ids = [];
-		if (event.messageReply && event.messageReply.senderID) ids.push(String(event.messageReply.senderID));
-		if (event.mentions && typeof event.mentions === "object") ids.push(...Object.keys(event.mentions).map(String));
-		for (const a of args) if (/^\d{5,}$/.test(a)) ids.push(a);
-		if (ids.some(id => admins.includes(id))) return true;
-
-		// @handle / profile-link arguments: compare with the admins' known handles first.
-		const utils = require("./utils");
-		const typed = args.map(a => (utils.instagramUsername(a) || (/^@?[A-Za-z0-9._]{2,30}$/.test(a) ? a.replace(/^@/, "") : ""))
-			.toLowerCase()).filter(Boolean);
-		if (!typed.length) return false;
-		const known = new Set();
-		for (const id of admins) {
-			try { const h = utils.cachedHandleForID && utils.cachedHandleForID(id); if (h) known.add(String(h).toLowerCase()); } catch (_) { /* optional */ }
-			try { const u = database.users.get(id); if (u && u.username) known.add(String(u.username).toLowerCase().replace(/^@/, "")); } catch (_) { /* optional */ }
-		}
-		if (typed.some(h => known.has(h))) return true;
-
-		// Unknown handle: look it up once (cached on disk) and compare ids.
-		if (args.some(a => /^@/.test(a) || /instagram\.com\//i.test(a))) {
-			try {
-				const found = await utils.resolveUserTarget(args, event, api);
-				if (found && found.id && admins.includes(String(found.id))) return true;
-			} catch (_) { /* lookup failed: let the command handle it */ }
-		}
-		return false;
-	}
-
 	function requiredRole(command, threadData) {
 		const configured = command.config.role;
 		let role = 0;
@@ -288,9 +245,8 @@ function createDispatcher({ api, config, registry, database }) {
 		if (!isBotAdmin(senderID) && commandName !== "help") {
 			const { MAIN_CATEGORIES, cleanCategoryName } = require("./helpMenu");
 			if (!MAIN_CATEGORIES.has(cleanCategoryName(command.config.category))) {
-				// Only the explicit `-onlyadmin on` switch locks these now. The old
-				// "group has no bot admin" lock is removed so everyone can use them.
-				const blocked = liveConfig().onlyAdminMore === true;
+				const blocked = liveConfig().onlyAdminMore === true ||
+					(event.isGroup !== false && !(await groupHasBotAdmin(event, threadData)));
 				if (blocked) {
 					if (!config.hideNotiMessage.adminOnly) return message.reply(DENY_TEXT);
 					return;
@@ -316,9 +272,6 @@ function createDispatcher({ api, config, registry, database }) {
 			}
 			return;
 		}
-
-		if (BOSS_PROTECTED.has(commandName) && !isBotAdmin(senderID) && await targetsBotAdmin(event, args))
-			return message.reply(BOSS_TEXT);
 
 		const wait = cooldownRemaining(command, senderID);
 		if (wait) return message.reply(t(config.language, "cooldown", wait, commandName));

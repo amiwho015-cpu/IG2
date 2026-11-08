@@ -13,7 +13,3 @@ instabot-live-send.json
 
 # local test junk
 tmp/
-
-# Login secrets: never commit.
-session.json
-account.txt

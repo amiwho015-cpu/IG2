@@ -57,16 +57,7 @@ async function loadAvatars(api, ids) {
 		catch (_) { /* placeholders below */ }
 	}
 	const images = {};
-	for (const part of chunk(unique, 20)) await Promise.all(part.map(async id => {
-		// HD picture from Instagram's private endpoint (cached); the thumbnail from
-		// getUserInfo is only ~150px and looks blurry on the big card.
-		try {
-			const hd = await require("./hdpic").hdProfilePicture(id, [urls[id]]);
-			if (hd && hd.buffer) { images[id] = await loadImage(hd.buffer); return; }
-		}
-		catch (_) { /* thumbnail below */ }
-		images[id] = await fetchImage(urls[id]);
-	}));
+	for (const part of chunk(unique, 20)) await Promise.all(part.map(async id => { images[id] = await fetchImage(urls[id]); }));
 	return { images, names };
 }
 
@@ -97,8 +88,6 @@ function shortName(name, max = 12) {
  */
 function drawMemberGrid(ctx, ids, avatars, opts) {
 	const { x0, y0, perRow, size, spacing, rowStep, textColor, memberColor, adminColor, adminSet, glow, startIndex = 0 } = opts;
-	const k = Math.max(1, size / 180); // scale badges / text with the avatar size
-	ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
 	let x = x0, y = y0;
 	for (let i = 0; i < ids.length; i++) {
 		const id = ids[i];
@@ -106,7 +95,7 @@ function drawMemberGrid(ctx, ids, avatars, opts) {
 
 		ctx.save();
 		ctx.fillStyle = "rgba(255,255,255,0.15)";
-		roundRect(ctx, x - 10, y - 10, size + 20, size + 60 * k, 20); ctx.fill();
+		roundRect(ctx, x - 10, y - 10, size + 20, size + 60, 20); ctx.fill();
 		if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = 20; }
 		ctx.beginPath(); ctx.arc(x + size / 2, y + size / 2, size / 2 - 8, 0, Math.PI * 2); ctx.clip();
 		const img = avatars.images[id];
@@ -114,14 +103,14 @@ function drawMemberGrid(ctx, ids, avatars, opts) {
 		ctx.restore();
 
 		ctx.save();
-		ctx.strokeStyle = color; ctx.lineWidth = 4 * k;
+		ctx.strokeStyle = color; ctx.lineWidth = 4;
 		ctx.beginPath(); ctx.arc(x + size / 2, y + size / 2, size / 2 - 8, 0, Math.PI * 2); ctx.stroke();
 		ctx.fillStyle = "rgba(0,0,0,0.7)";
-		ctx.beginPath(); ctx.arc(x + 35 * k, y + 35 * k, 20 * k, 0, Math.PI * 2); ctx.fill();
-		ctx.fillStyle = textColor; ctx.font = `bold ${Math.round(20 * k)}px Arial`; ctx.textAlign = "center";
-		ctx.fillText(`#${startIndex + i + 1}`, x + 35 * k, y + 35 * k + 6 * k);
+		ctx.beginPath(); ctx.arc(x + 35, y + 35, 20, 0, Math.PI * 2); ctx.fill();
+		ctx.fillStyle = textColor; ctx.font = "bold 20px Arial"; ctx.textAlign = "center";
+		ctx.fillText(`#${startIndex + i + 1}`, x + 35, y + 40);
 		const label = shortName(avatars.names[id]);
-		if (label) { ctx.font = `bold ${Math.round(24 * k)}px Arial`; ctx.fillText(label, x + size / 2, y + size + 28 * k); }
+		if (label) { ctx.font = "bold 24px Arial"; ctx.fillText(label, x + size / 2, y + size + 28); }
 		ctx.restore();
 
 		x += size + spacing;
@@ -130,22 +119,13 @@ function drawMemberGrid(ctx, ids, avatars, opts) {
 	return y + (ids.length % perRow === 0 ? 0 : rowStep);
 }
 
-/** HD JPEG: long side capped at 4096px, quality 0.95; falls back to smaller if the file gets too big for Instagram. */
+/** HD JPEG: long side capped at 2400px (very large uploads fail on Instagram), quality 0.93. */
 function exportJpeg(canvas, createCanvas) {
-	const MAX_SIDE = 4096, MAX_BYTES = 8 * 1024 * 1024;
-	const render = (side, quality) => {
-		const scale = Math.min(1, side / Math.max(canvas.width, canvas.height));
-		if (scale === 1) return canvas.toBuffer("image/jpeg", { quality });
-		const out = createCanvas(Math.round(canvas.width * scale), Math.round(canvas.height * scale));
-		const c = out.getContext("2d");
-		c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
-		c.drawImage(canvas, 0, 0, out.width, out.height);
-		return out.toBuffer("image/jpeg", { quality });
-	};
-	let buffer = render(MAX_SIDE, 0.95);
-	if (buffer.length > MAX_BYTES) buffer = render(3200, 0.9);
-	if (buffer.length > MAX_BYTES) buffer = render(2400, 0.88);
-	return buffer;
+	const scale = Math.min(1, 2400 / Math.max(canvas.width, canvas.height));
+	if (scale === 1) return canvas.toBuffer("image/jpeg", { quality: 0.93 });
+	const out = createCanvas(Math.round(canvas.width * scale), Math.round(canvas.height * scale));
+	out.getContext("2d").drawImage(canvas, 0, 0, out.width, out.height);
+	return out.toBuffer("image/jpeg", { quality: 0.93 });
 }
 
 module.exports = { MAX_MEMBERS, roundRect, fetchImage, loadAvatars, drawFallback, getGroup, shortName, drawMemberGrid, exportJpeg };

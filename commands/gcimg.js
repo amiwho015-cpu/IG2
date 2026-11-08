@@ -48,14 +48,13 @@ module.exports = {
 			const avatars = await loadAvatars(api, [...members, ...shownAdmins]);
 
 			// every member on one picture: the canvas grows with the group size
-			const size = 300, perRow = 6, spacing = 40, rowStep = size + spacing + 30;
+			const size = 180, perRow = 8, spacing = 40, rowStep = size + spacing + 30;
 			const rows = Math.ceil(members.length / perRow);
 			const adminPanelH = 70 + shownAdmins.length * 170 + 40;
 			const width = 3200;
 			const height = Math.max(2000, 720 + rows * rowStep + 200, 650 + 30 + adminPanelH + 200);
 			const canvas = createCanvas(width, height);
 			const ctx = canvas.getContext("2d");
-			ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
 
 			const bg = await fetchImage("https://i.imgur.com/yBWS5ju.jpeg");
 			if (bg) {

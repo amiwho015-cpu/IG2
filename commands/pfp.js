@@ -35,7 +35,7 @@ module.exports = {
 		const hd = await hdProfilePicture(String(profile.userID || target.id), [picture]).catch(() => null);
 		if (hd && hd.buffer) {
 			const quality = hd.width ? ` • ${hd.width}x${hd.height}` : "";
-			return message.reply({ attachment: { buffer: hd.buffer, fileName: `profile_hd.${hd.ext}` }, body: `🖼️ ${name} (${target.id})${quality}${(hd.width || 0) >= 500 ? " HD" : " (Instagram gave only this size)"}`, textFirst: true });
+			return message.reply({ attachment: { buffer: hd.buffer, fileName: `profile_hd.${hd.ext}` }, body: `🖼️ ${name} (${target.id})${quality} HD`, textFirst: true });
 		}
 		await message.reply({ attachment: picture, body: `🖼️ ${name} (${target.id})`, textFirst: true });
 	}

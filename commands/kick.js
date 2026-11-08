@@ -9,7 +9,7 @@ module.exports = {
 		version: "3.0",
 		author: "CRX Shihab",
 		countDown: 5,
-		role: 2,
+		role: 1,
 		shortDescription: "Kick members from group",
 		longDescription: "Remove members by tagging, replying, or giving a username / uid.",
 		category: "box chat",

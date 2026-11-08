@@ -6,7 +6,7 @@ module.exports = {
 		version: "2.0",
 		author: "CRX Shihab",
 		countDown: 5,
-		role: 2,
+		role: 1,
 		shortDescription: "Enable or disable antiout",
 		longDescription: "When on, a member who leaves the group by themselves is added back automatically.",
 		category: "box chat",
