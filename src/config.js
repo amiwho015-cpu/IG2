@@ -304,11 +304,16 @@ function loadAccount() {
 			if (has("sessionid") && has("ds_user_id")) return cookies;
 		}
 	}
-	if (!fromEnv && !fs.existsSync(accountPathFor()))
+	if (!fromEnv && !fs.existsSync(accountPathFor())) {
+		// Safe diagnostics: never print the value, only whether the variable reached the process.
+		const sj = process.env.SESSION_JSON;
+		const diag = sj === undefined ? "SESSION_JSON: not set in this process"
+			: `SESSION_JSON: set, length ${sj.length}, starts with "${sj.trim().charAt(0)}", ends with "${sj.trim().slice(-1)}"`;
 		throw new Error(
 			"No Instagram cookies found. Set the IG_COOKIES environment variable, or copy account.example.txt to account.txt and paste your cookies. " +
-			"account.txt is git-ignored, so your cookies are never committed."
+			"account.txt is git-ignored, so your cookies are never committed. [" + diag + "]"
 		);
+	}
 	return parseAccountText(fromEnv || fs.readFileSync(accountPathFor(), "utf8"));
 }
 
