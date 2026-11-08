@@ -674,7 +674,7 @@ Never put the token in a public repo.
 
 This build vendors the Tanvir143 `tanvir-mqtt` ICA source under `vendor/tanvir-mqtt/` and retains its original package license and source files. The existing IG2 `src/igAdapter.js` remains the active command compatibility layer so existing IG2 commands, reply handling, media shims, and unsend behavior are not replaced by an incompatible API surface.
 
-`config.json` now sets `instachat.mqtt=true` and `instachat.mqttMode="auto"`. The bundled IG2 realtime client will try its supported realtime transports and retain polling as fallback. This is safer than pinning the `robot` transport when it returns MQTT CONNACK refused.
+`config.json` now sets `instachat.mqtt=true` and `instachat.mqttMode="ica"` for MQTT over WebSocket. Incoming message_sync payloads are decoded and dispatched directly; polling remains as a safety fallback.
 
 Important: the vendored Tanvir ICA package is included for staged backend integration, but this candidate does **not** claim that every command has been verified against Tanvir's ICA transport. Instagram may also reject uploads, replies, unsend, or realtime sessions depending on account prompts, rate limits, and server-side API changes. Run the test suite and a controlled account test before production use.
 
@@ -694,3 +694,8 @@ Do not commit `session.json`, cookies, or tokens to GitHub. Add your own session
 - Existing commands, including `commands/song.js`, are preserved unchanged.
 - `commands/music.js` uses the Instagram music catalogue search exposed by ICA. The bundled ICA source does not implement native Direct music-share sending in this version; the adapter returns a clear error instead of falsely sending the track title as text. Native Music DM sharing therefore still requires a supported Instagram Direct music-share endpoint/API implementation and live verification.
 - Set `IG_MODE=instachat` only if you need to temporarily switch back to the previous built-in adapter and set `IG_FORCE_MODE=1` to honor that override.
+
+
+### MQTT WebSocket realtime listener
+
+The bundled configuration uses `instachat.mqtt: true` and `instachat.mqttMode: "ica"` to select the MQTT-over-WebSocket transport (`wss://edge-chat.instagram.com/chat`). Incoming `/ig_message_sync` payloads are decoded and passed directly to the realtime message handler; the normal inbox poll remains as a 1.5-second safety/recovery path while MQTT pushes are active. If the socket disconnects, the listener falls back to normal polling and MQTT.js reconnects. Instagram may change or reject unofficial endpoints at any time, so a successful connection cannot be guaranteed for every account/session.

@@ -128,7 +128,7 @@ function loadConfig() {
 	if (ic.adaptivePolling == null) ic.adaptivePolling = true;
 	// Realtime push (MQTT over WebSocket): off unless enabled; mode ica|native|library|auto.
 	if (ic.mqtt == null) ic.mqtt = false;
-	if (!ic.mqttMode) ic.mqttMode = "auto";
+	if (!ic.mqttMode) ic.mqttMode = "ica";
 	if (ic.throttle !== false) {
 		ic.throttle = ic.throttle && typeof ic.throttle === "object" ? ic.throttle : {};
 		if (ic.throttle.minGapMs == null) ic.throttle.minGapMs = 450;

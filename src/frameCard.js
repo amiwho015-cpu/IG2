@@ -309,42 +309,51 @@ function createFrameCommand({ name, family: familyKey, variant = 1 }) {
 			countDown: 5,
 			shortDescription: `${family.title} card with two profile pictures`,
 			category: "LOVE",
-			guide: "{pn} @username | reply to someone | {pn} <user id>"
+			guide: "{pn} @user1 @user2 | reply to someone | {pn} @username"
 		},
 
 		onStart: async function ({ api, event, args = [], message, usersData }) {
 			const senderID = String(event.senderID);
 			try {
 				// who is the other person: a reply wins, then a tag, then an id / @username / profile link
-				let targetID = null;
-				if (event.messageReply && event.messageReply.senderID) targetID = String(event.messageReply.senderID);
-				else if (event.mentions && Object.keys(event.mentions).length) targetID = String(Object.keys(event.mentions)[0]);
-				else if (args.length) {
-					const { resolveUserTarget } = require("./utils");
-					const found = await resolveUserTarget(args, event, api);
-					if (found && found.id) targetID = String(found.id);
-					else if (found && found.rateLimited) return message.reply("⚠️ Instagram is rate limiting lookups right now. Reply to the person's message instead, or try again in a minute.");
+				const mentionIDs = Object.keys(event.mentions || {}).map(String);
+				let userA = senderID;
+				let userB = null;
+				// Two explicit tags mean the command acts on those two people: -love3 @user1 @user2.
+				if (mentionIDs.length >= 2) {
+					[userA, userB] = mentionIDs.slice(0, 2);
 				}
-				if (!targetID)
-					return message.reply(`⚠️ Tag or reply to someone.\nExample: reply to their message with  ${name}  or use  ${name} @username`);
+				else {
+					if (event.messageReply && event.messageReply.senderID) userB = String(event.messageReply.senderID);
+					else if (mentionIDs.length) userB = mentionIDs[0];
+					else if (args.length) {
+						const { resolveUserTarget } = require("./utils");
+						const found = await resolveUserTarget(args, event, api);
+						if (found && found.id) userB = String(found.id);
+						else if (found && found.rateLimited) return message.reply("⚠️ Instagram is rate limiting lookups right now. Reply to the person's message instead, or try again in a minute.");
+					}
+				}
+				if (!userB)
+					return message.reply(`⚠️ Tag two people, or reply to someone's message.\nExample: ${name} @user1 @user2`);
+				if (userA === userB) return message.reply("⚠️ Please choose two different people.");
 
 				const [rawA, rawB, urlA, urlB] = await Promise.all([
-					usersData.getName(senderID), usersData.getName(targetID),
-					usersData.getAvatarUrl(senderID), usersData.getAvatarUrl(targetID)
+					usersData.getName(userA), usersData.getName(userB),
+					usersData.getAvatarUrl(userA), usersData.getAvatarUrl(userB)
 				]);
 				const [imgA, imgB] = await Promise.all([
 					safeLoadImage(Canvas, axios, urlA),
 					safeLoadImage(Canvas, axios, urlB)
 				]);
 
-				const percent = pairPercent(senderID, targetID);
+				const percent = pairPercent(userA, userB);
 				const tpl = loadTemplates()[name];
 				// byGender families: template slot "a" is the girl's spot and "b" the boy's spot.
 				// Whoever uses the command takes the spot that matches their own gender.
 				let senderIsBoy = false;
 				if (family.byGender) {
 					const { assignSpots } = require("./gender");
-					senderIsBoy = await assignSpots(usersData, senderID, targetID);
+					senderIsBoy = await assignSpots(usersData, userA, userB);
 				}
 				let png = null;
 				if (tpl && tpl.bg) {

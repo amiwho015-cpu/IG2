@@ -25,7 +25,8 @@ module.exports = {
     author: "CRX Shihab",
     role: 0,
     countDown: 5,
-    shortDescription: "Romantic pair system with random background",
+    shortDescription: "Pair two tagged users or find a random match",
+    guide: "{pn} @user1 @user2 | {pn} (random pair)",
     category: "LOVE"
   },
 
@@ -33,11 +34,23 @@ module.exports = {
     const { threadID, messageID, senderID, messageReply } = event;
 
     try {
+      const mentionIDs = Object.keys(event.mentions || {}).map(String);
       let targetID = senderID;
       let targetName = null;
+      let forcedPartnerID = null;
 
-      if (messageReply) {
-        targetID = messageReply.senderID;
+      if (mentionIDs.length >= 2) {
+        [targetID, forcedPartnerID] = mentionIDs.slice(0, 2);
+      } else if (messageReply) {
+        targetID = String(messageReply.senderID);
+      } else if (mentionIDs.length === 1) {
+        targetID = mentionIDs[0];
+      }
+
+      if (forcedPartnerID && forcedPartnerID === targetID) {
+        return api.sendMessage("⚠️ Please tag two different people.", threadID, messageID);
+      }
+      if (targetID !== String(senderID)) {
         try {
           const userData = await usersData.get(targetID);
           targetName = userData.name || "User";
@@ -57,7 +70,13 @@ module.exports = {
       const wanted = ["boy", "girl"].includes(String(args[0] || "").toLowerCase()) ? String(args[0]).toLowerCase() : null;
       let me, partner;
       try {
-        ({ me, partner } = await pickPartner(usersData, String(targetID), members, wanted));
+        if (forcedPartnerID) {
+          [me, partner] = await Promise.all([usersData.get(targetID), usersData.get(forcedPartnerID)]);
+          me = { ...me, id: String(targetID) };
+          partner = { ...partner, id: String(forcedPartnerID) };
+        } else {
+          ({ me, partner } = await pickPartner(usersData, String(targetID), members, wanted));
+        }
       } catch (e) {
         if (e.friendly) return api.sendMessage("⚠️ " + e.message, threadID, messageID);
         throw e;

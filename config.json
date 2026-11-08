@@ -117,7 +117,7 @@
     "idlePollIntervalMs": 500,
     "adaptivePolling": true,
     "mqtt": true,
-    "mqttMode": "auto",
+    "mqttMode": "ica",
     "throttle": {
       "minGapMs": 250,
       "perThreadGapMs": 400,

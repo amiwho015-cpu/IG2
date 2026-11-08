@@ -22,19 +22,20 @@ const Trigger = require(path.join(dir, "ica-mqtt-trigger"));
 Module._load = origLoad;
 
 const silent = { info() { }, warn() { }, debug() { }, error() { } };
-const mkRealtime = () => ({ active: null, wakes: 0, setPushActive(a, ms) { this.active = a; this.ms = ms; }, wake() { this.wakes++; } });
+const mkRealtime = () => ({ active: null, wakes: 0, setPushActive(a, ms) { this.active = a; this.ms = ms; }, handlePush() { return 0; }, wake() { this.wakes++; } });
 
 test("polling is slowed only after a real push, restored when the socket drops", async () => {
 	const rt = mkRealtime();
-	const t = new Trigger({ session: {}, realtime: rt, logger: silent, safetyIntervalMs: 20000 });
+	const t = new Trigger({ session: {}, realtime: rt, logger: silent });
 	assert.strictEqual(await t.start(), true);
 	assert.strictEqual(rt.active, null, "connect alone must not slow polling");
-	FakeClient.last.emit("publish", { topic: "/ig_message_sync" });
-	assert.strictEqual(rt.active, true);
-	assert.strictEqual(rt.ms, 20000);
-	assert.strictEqual(rt.wakes, 1);
 	FakeClient.last.emit("publish", { topic: "/pubsub" });
-	assert.strictEqual(rt.wakes, 2);
+	assert.strictEqual(rt.active, null, "non-message topics must not mark DM push healthy");
+	assert.strictEqual(rt.wakes, 0);
+	FakeClient.last.emit("publish", { topic: "/ig_message_sync", payload: { data: [] } });
+	assert.strictEqual(rt.active, true);
+	assert.strictEqual(rt.ms, 1500);
+	assert.strictEqual(rt.wakes, 1);
 	FakeClient.last.emit("disconnected");
 	assert.strictEqual(rt.active, false);
 	await t.stop();
