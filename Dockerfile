@@ -1,22 +1,35 @@
-# InstaBOT — Render / any container host (Debian: canvas has prebuilt binaries, no compile needed)
 FROM node:20-bookworm-slim
 
 ENV NODE_ENV=production
 ENV PORT=8080
 
-# Runtime libs for the prebuilt `canvas` binary + fonts + ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 libpixman-1-0 \
-      fontconfig fonts-dejavu-core ffmpeg ca-certificates \
+    python3 \
+    make \
+    g++ \
+    build-essential \
+    pkg-config \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    ffmpeg \
+    fontconfig \
+    fonts-dejavu-core \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+
+COPY package*.json ./
+
+RUN npm install --omit=dev --no-audit --no-fund
 
 COPY . .
-RUN mkdir -p data && chown -R node:node /app
-USER node
+
+RUN mkdir -p data
 
 EXPOSE 8080
+
 CMD ["node", "index.js"]
