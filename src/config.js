@@ -155,32 +155,42 @@ function saveConfig(config) {
 }
 
 function isNetScapeCookie(text) {
-	return /(.+)\t(1|TRUE|true)\t([\w/.-]*)\t(1|TRUE|true)\t\d+\t([\w-]+)\t(.+)/i.test(text);
+	// Netscape cookie jars have seven tab-separated columns. FALSE is valid too.
+	return String(text).split(/\r?\n/).some(rawLine => {
+		const line = rawLine.trim();
+		if (!line || (line.startsWith("#") && !/^#HttpOnly_/i.test(line))) return false;
+		const fields = line.replace(/^#HttpOnly_/i, "").split("\t");
+		return fields.length >= 7 &&
+			/^(?:TRUE|FALSE|1|0)$/i.test(fields[1]) &&
+			/^(?:TRUE|FALSE|1|0)$/i.test(fields[3]) &&
+			/^\d+$/.test(fields[4]) &&
+			!!fields[5];
+	});
 }
 
 function netScapeToCookies(text) {
 	const cookies = [];
-	for (const rawLine of text.split(/\r?\n/)) {
+	for (const rawLine of String(text).split(/\r?\n/)) {
 		const line = rawLine.trim();
-		// `#HttpOnly_` lines are real cookies, not comments; only skip the rest.
 		if (!line || (line.startsWith("#") && !/^#HttpOnly_/i.test(line))) continue;
-		const fields = line.replace(/^#HttpOnly_/i, "").split("\t").map(f => f.trim()).filter(Boolean);
-		if (fields.length < 7) continue;
+		const fields = line.replace(/^#HttpOnly_/i, "").split("\t");
+		if (fields.length < 7 || !fields[5]) continue;
 		cookies.push({
-			key: fields[5],
-			value: fields[6],
-			domain: fields[0].replace(/^\./, ""),
-			path: fields[2] || "/"
+			key: fields[5].trim(),
+			value: fields.slice(6).join("\t").trim(),
+			domain: fields[0].replace(/^\./, "").trim() || "instagram.com",
+			path: fields[2].trim() || "/"
 		});
 	}
 	return cookies;
 }
 
 function cookieHeaderToCookies(text) {
-	return String(text)
-		.replace(/^cookie\s*:/i, "")
-		.replace(/\r?\n/g, " ")
-		.split(";")
+	const source = String(text)
+		.replace(/^\s*(?:cookie\s*:)\s*/i, "")
+		.replace(/\r\n?/g, "\n")
+		.replace(/\n(?=[\w.-]+\s*=)/g, ";");
+	return source.split(";")
 		.map(part => part.trim())
 		.filter(Boolean)
 		.map(part => {
@@ -194,6 +204,26 @@ function cookieHeaderToCookies(text) {
 			};
 		})
 		.filter(Boolean);
+}
+
+function objectToCookieList(obj) {
+	if (!obj || typeof obj !== "object") return [];
+	// Common browser/Playwright/Puppeteer cookie export property names.
+	for (const key of ["cookies", "cookie", "appState", "session", "sessionData", "data", "storageState"]) {
+		if (obj[key] !== undefined) {
+			const nested = obj[key];
+			if (Array.isArray(nested)) return nested;
+			if (nested && typeof nested === "object") return objectToCookieList(nested);
+			if (typeof nested === "string") {
+				try { return objectToCookieList(JSON.parse(nested)); } catch (_) {}
+			}
+		}
+	}
+	// Cookie extension exports often use {name: value} or {name: {value, domain}}.
+	return Object.entries(obj).map(([key, value]) => {
+		if (value && typeof value === "object") return Object.assign({ key, name: key }, value);
+		return { key, name: key, value };
+	});
 }
 
 function normalizeCookies(list) {
@@ -211,12 +241,16 @@ function normalizeCookies(list) {
  * Accepts: JSON array, JSON object, cookie header string, Netscape file.
  */
 function parseAccountText(rawText) {
-	const text = String(rawText || "").trim();
-	if (!text) throw new Error("account.txt is empty");
+	let text = String(rawText || "").trim();
+	if (!text) throw new Error("Instagram cookie input is empty");
 
 	let cookies = [];
-
-	if (text.startsWith("[") || text.startsWith("{")) {
+	// Netscape / Mozilla cookie.txt
+	if (isNetScapeCookie(text)) {
+		cookies = netScapeToCookies(text);
+	}
+	// JSON arrays, JSON objects, nested session exports, and JSON strings.
+	else if (/^[\[{"']/.test(text)) {
 		let parsed;
 		try {
 			parsed = JSON.parse(text);
@@ -224,46 +258,23 @@ function parseAccountText(rawText) {
 		catch (error) {
 			throw new Error(`Instagram cookie JSON is invalid: ${error.message}`);
 		}
-
-		// Accept common session-export wrappers:
-		// [cookie, ...], {cookies:[...]}, {appState:[...]},
-		// {sessionid:"...", ds_user_id:"..."}, and JSON-stringified cookie blobs.
-		for (let depth = 0; depth < 3 && parsed && !Array.isArray(parsed); depth++) {
-			if (typeof parsed === "string") {
-				try { parsed = JSON.parse(parsed); } catch (_) { break; }
-				continue;
-			}
-			const wrapped = parsed.cookies ?? parsed.appState ?? parsed.cookie ??
-				parsed.session ?? parsed.sessionData ?? parsed.data;
-			if (wrapped !== undefined) {
-				parsed = wrapped;
-				continue;
-			}
-			break;
+		for (let depth = 0; depth < 5 && typeof parsed === "string"; depth++) {
+			try { parsed = JSON.parse(parsed); } catch (_) { break; }
 		}
-		if (!Array.isArray(parsed)) {
-			if (!parsed || typeof parsed !== "object")
-				throw new Error("Instagram cookie JSON must be an array or an object of cookie names and values");
-			parsed = Object.keys(parsed).map(key => {
-				const value = parsed[key];
-				return value && typeof value === "object"
-					? Object.assign({ key }, value)
-					: { key, value };
-			});
-		}
-		cookies = normalizeCookies(parsed);
+		cookies = Array.isArray(parsed) ? parsed : objectToCookieList(parsed);
+		cookies = normalizeCookies(cookies);
 	}
-	else if (isNetScapeCookie(text)) {
-		cookies = netScapeToCookies(text);
-	}
+	// Raw Cookie header or newline-separated NAME=VALUE pairs.
 	else {
 		cookies = cookieHeaderToCookies(text);
 	}
 
-	const has = key => cookies.some(cookie => cookie.key === key);
+	cookies = normalizeCookies(cookies);
+	const has = key => cookies.some(cookie => cookie.key.toLowerCase() === key.toLowerCase());
 	if (!has("sessionid") || !(has("ds_user_id") || has("userid")))
-		throw new Error("Instagram cookies (IG_COOKIES / account.txt) must contain Instagram `sessionid` and `ds_user_id` cookies");
-
+		throw new Error(
+			"Instagram cookies are incomplete. The imported format was read, but it must include both `sessionid` and `ds_user_id` (or `userid`)."
+		);
 	return cookies;
 }
 
