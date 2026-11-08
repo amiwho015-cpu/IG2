@@ -222,11 +222,34 @@ function parseAccountText(rawText) {
 			parsed = JSON.parse(text);
 		}
 		catch (error) {
-			throw new Error(`account.txt is invalid JSON: ${error.message}`);
+			throw new Error(`Instagram cookie JSON is invalid: ${error.message}`);
+		}
+
+		// Accept common session-export wrappers:
+		// [cookie, ...], {cookies:[...]}, {appState:[...]},
+		// {sessionid:"...", ds_user_id:"..."}, and JSON-stringified cookie blobs.
+		for (let depth = 0; depth < 3 && parsed && !Array.isArray(parsed); depth++) {
+			if (typeof parsed === "string") {
+				try { parsed = JSON.parse(parsed); } catch (_) { break; }
+				continue;
+			}
+			const wrapped = parsed.cookies ?? parsed.appState ?? parsed.cookie ??
+				parsed.session ?? parsed.sessionData ?? parsed.data;
+			if (wrapped !== undefined) {
+				parsed = wrapped;
+				continue;
+			}
+			break;
 		}
 		if (!Array.isArray(parsed)) {
-			const obj = parsed.cookies || parsed.appState || parsed;
-			parsed = Array.isArray(obj) ? obj : Object.keys(obj).map(key => ({ key, value: obj[key] }));
+			if (!parsed || typeof parsed !== "object")
+				throw new Error("Instagram cookie JSON must be an array or an object of cookie names and values");
+			parsed = Object.keys(parsed).map(key => {
+				const value = parsed[key];
+				return value && typeof value === "object"
+					? Object.assign({ key }, value)
+					: { key, value };
+			});
 		}
 		cookies = normalizeCookies(parsed);
 	}
@@ -245,12 +268,21 @@ function parseAccountText(rawText) {
 }
 
 function loadAccount() {
-	// IG_COOKIES (env var, e.g. on Railway/Render) wins over account.txt.
-	const fromEnv = process.env.IG_COOKIES && process.env.IG_COOKIES.trim();
+	// IG_COOKIES is the canonical Railway/Render variable. The aliases allow
+	// common existing deployments to migrate without renaming their secret.
+	const envNames = ["IG_COOKIES", "IG_SESSION_JSON", "SESSION_JSON", "INSTAGRAM_COOKIES"];
+	let fromEnv = "";
+	for (const name of envNames) {
+		if (typeof process.env[name] === "string" && process.env[name].trim()) {
+			fromEnv = process.env[name].trim();
+			break;
+		}
+	}
 	if (!fromEnv && !fs.existsSync(accountPathFor()))
 		throw new Error(
-			"No Instagram cookies found. Set the IG_COOKIES environment variable, or copy account.example.txt to account.txt and paste your cookies. " +
-			"account.txt is git-ignored, so your cookies are never committed."
+			"No Instagram cookies found. Add a Railway variable named IG_COOKIES (recommended), " +
+			"or IG_SESSION_JSON / SESSION_JSON / INSTAGRAM_COOKIES. The variable must contain cookies " +
+			"including sessionid and ds_user_id. Alternatively create account.txt."
 		);
 	return parseAccountText(fromEnv || fs.readFileSync(accountPathFor(), "utf8"));
 }
