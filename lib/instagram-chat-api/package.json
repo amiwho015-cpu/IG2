@@ -1,0 +1,42 @@
+{
+  "name": "instagram-chat-api",
+  "version": "1.1.0",
+  "description": "Lightweight, modular, zero-browser-overhead Instagram Direct Web Messaging API for Node.js",
+  "main": "src/index.js",
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jarif098/instagram-chat-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jarif098/instagram-chat-api/issues"
+  },
+  "homepage": "https://github.com/jarif098/instagram-chat-api#readme",
+  "keywords": [
+    "instagram",
+    "direct-messages",
+    "instagram-dm",
+    "messaging",
+    "bot",
+    "api",
+    "chat",
+    "instagram-api",
+    "instagram-bot",
+    "dm-bot",
+    "chat-theme",
+    "realtime",
+    "notes"
+  ],
+  "author": "JARiF",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.7.9"
+  }
+}
