@@ -663,18 +663,7 @@ async function enrichMentions(ctx) {
 	if (!handles.length) return;
 	const { resolveUserTarget } = require("./utils");
 	const mentions = {};
-	// Fast path: people in this chat are already known with their @username (no Instagram lookup,
-	// no rate limit). Only handles that are not chat members go through the slower lookup below.
-	let members = [];
-	try {
-		const info = ctx.api && typeof ctx.api.getThreadInfo === "function" ? await ctx.api.getThreadInfo(event.threadID) : null;
-		members = (info && Array.isArray(info.userInfo) ? info.userInfo : []).filter(u => u && (u.vanity || u.username));
-	}
-	catch (_) { /* fall back to lookups */ }
 	for (const handle of handles) {
-		const want = handle.replace(/^@/, "").toLowerCase();
-		const hit = members.find(u => String(u.vanity || u.username).toLowerCase() === want);
-		if (hit && (hit.userID || hit.id)) { mentions[String(hit.userID || hit.id)] = handle; continue; }
 		try {
 			const target = await resolveUserTarget([handle], Object.assign({}, event, { messageReply: null }), ctx.api);
 			if (target && target.id) mentions[String(target.id)] = handle;

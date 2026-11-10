@@ -3,7 +3,7 @@ const { pickPartner } = require("../src/gender");
 const Canvas = require("canvas");
 const fs = require("fs");
 const path = require("path");
-const { safeLoadImage, safeLoadBackground, safeThreadInfo, explicitPair, bothKnown } = require("../src/pairUtil");
+const { safeLoadImage, safeLoadBackground, safeThreadInfo } = require("../src/pairUtil");
 
 module.exports = {
   config: {
@@ -33,10 +33,6 @@ module.exports = {
         }
       }
 
-      // @tagged people: one tag = you + them, two tags = those two (no random partner)
-      const forced = explicitPair(event, targetID);
-      if (forced) { targetID = forced.targetID; targetName = null; }
-
       const loading = await api.sendMessage("💗 | Finding your perfect partner...", threadID);
 
       const [senderData, threadInfo] = await Promise.all([
@@ -50,7 +46,7 @@ module.exports = {
       const wanted = ["boy", "girl"].includes(String(args[0] || "").toLowerCase()) ? String(args[0]).toLowerCase() : null;
       let me, partner;
       try {
-        ({ me, partner } = forced ? await bothKnown(usersData, targetID, forced.partnerID) : await pickPartner(usersData, String(targetID), members, wanted));
+        ({ me, partner } = await pickPartner(usersData, String(targetID), members, wanted));
       } catch (e) {
         if (e.friendly) {
           if (loading && loading.messageID) { try { await api.unsendMessage(loading.messageID, threadID); } catch {} }

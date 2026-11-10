@@ -51,13 +51,7 @@ const FAMILIES = {
 	finger:     { title: "POINT",       shape: "bolt",  percent: false, caption: (a, b) => `👆 ${a} আঙুল তুলল ${b} এর দিকে 😜` },
 	cdi:        { title: "FUN FRAME",   shape: "star",  percent: false, caption: (a, b) => `😜 ${a} আর ${b} — মজার ফ্রেম!` },
 	gaa:        { title: "FUN FRAME",   shape: "bolt",  percent: false, caption: (a, b) => `😜 ${a} → ${b} 😂` },
-	gu:         { title: "FUN FRAME",   shape: "cross", percent: false, caption: (a, b) => `😜 ${a} → ${b} 😂` },
-	crush:      { title: "CRUSH",       shape: "heart", percent: true,  caption: (a, b, p) => `😍 ${a} এর ক্রাশ ${b}! 💘\n📊 ক্রাশ মিটার: ${p}%` },
-	soulmate:   { title: "SOULMATES",   shape: "star",  percent: true,  caption: (a, b, p) => `✨ ${a} আর ${b} — সোলমেট! 💞\n📊 মিল: ${p}%` },
-	enemy:      { title: "ENEMIES",     shape: "bolt",  percent: false, caption: (a, b) => `⚔️ ${a} আর ${b} — চিরশত্রু! 😤🔥` },
-	bro:        { title: "BHAI BHAI",   shape: "star",  percent: false, caption: (a, b) => `🤜🤛 ${a} আর ${b} — ভাই ভাই! 💪` },
-	date:       { title: "DATE NIGHT",  shape: "heart", percent: false, caption: (a, b) => `🌹 ${a} ${b} কে ডেটে নিয়ে গেল 🍽️💕` },
-	cheater:    { title: "CHEATER",     shape: "cross", percent: false, gray: true, caption: (a, b) => `🚨 ${a} ধরল ${b} কে — ধোঁকাবাজ! 💔😂` }
+	gu:         { title: "FUN FRAME",   shape: "cross", percent: false, caption: (a, b) => `😜 ${a} → ${b} 😂` }
 };
 
 /* ------------------------------------------------------------------ helpers */
@@ -329,10 +323,6 @@ function createFrameCommand({ name, family: familyKey, variant = 1 }) {
 				if (taggedIDs.length >= 2) {
 					firstID = taggedIDs[0];
 					secondID = taggedIDs[1];
-				} else if (event.messageReply && event.messageReply.senderID && taggedIDs.length === 1 && taggedIDs[0] !== String(event.messageReply.senderID)) {
-					// reply + one tag = those two people: the tagged one first, the replied-to person second
-					firstID = taggedIDs[0];
-					secondID = String(event.messageReply.senderID);
 				} else if (event.messageReply && event.messageReply.senderID) {
 					secondID = String(event.messageReply.senderID);
 				} else if (taggedIDs.length === 1) {
@@ -344,7 +334,7 @@ function createFrameCommand({ name, family: familyKey, variant = 1 }) {
 					else if (found && found.rateLimited) return message.reply("⚠️ Instagram is rate limiting lookups right now. Reply to the person's message instead, or try again in a minute.");
 				}
 				if (!secondID)
-					return message.reply(`⚠️ Tag two users, or tag/reply to one user.\\nExample: ${name} @user1 @user2  |  ${name} @user  |  (reply) ${name}`);
+					return message.reply(`⚠️ Tag two users, or tag/reply to one user.\\nExample: ${name} @user1 @user2`);
 
 				const [rawA, rawB, urlA, urlB] = await Promise.all([
 					usersData.getName(firstID), usersData.getName(secondID),

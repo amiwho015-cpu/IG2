@@ -238,6 +238,22 @@ function createDispatcher({ api, config, registry, database }) {
 			return;
 		}
 
+		// help2 commands (every category except anime / image / media; `help` stays open):
+		//  1. `-onlyadmin on`  -> bot admins only.
+		//  2. Even with onlyadmin OFF, they only work in groups where a bot admin
+		//     is a member. Anyone else gets the "Group is Locked" reply.
+		if (!isBotAdmin(senderID) && commandName !== "help") {
+			const { MAIN_CATEGORIES, cleanCategoryName } = require("./helpMenu");
+			if (!MAIN_CATEGORIES.has(cleanCategoryName(command.config.category))) {
+				const blocked = liveConfig().onlyAdminMore === true ||
+					(event.isGroup !== false && !(await groupHasBotAdmin(event, threadData)));
+				if (blocked) {
+					if (!config.hideNotiMessage.adminOnly) return message.reply(DENY_TEXT);
+					return;
+				}
+			}
+		}
+
 		const role = roleOf(event, threadData);
 
 		// Per-group "only group admins can use the bot" mode (command: adboxonly).

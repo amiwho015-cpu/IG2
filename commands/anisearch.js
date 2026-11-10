@@ -10,7 +10,7 @@ const sv = require("../src/shortVideo");
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const HOSTS = ["https://www.tikwm.com", "https://tikwm.com"];
-const MAX_BYTES = 95 * 1024 * 1024;
+const MAX_BYTES = 40 * 1024 * 1024;
 const MAX_ATTEMPTS = 4;
 
 async function searchVideos(query) {
@@ -48,7 +48,7 @@ async function searchVideos(query) {
 async function getVideo(url) {
 	const res = await axios.get(url, {
 		responseType: "arraybuffer",
-		timeout: 240000,
+		timeout: 60000,
 		maxContentLength: MAX_BYTES,
 		maxBodyLength: MAX_BYTES,
 		headers: { "User-Agent": UA, "Referer": "https://www.tiktok.com/" }

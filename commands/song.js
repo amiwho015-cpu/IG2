@@ -14,7 +14,7 @@ const fs = require("fs-extra");
 const axios = require("axios");
 const path = require("path");
 
-const MAX_SIZE = 95 * 1024 * 1024;
+const MAX_SIZE = 25 * 1024 * 1024;
 
 function getError(err) {
     if (!err) return "Unknown error";
@@ -247,7 +247,7 @@ async function sendFirstSong(api, event, track) {
 
         if (contentLength > MAX_SIZE) {
             response.data.destroy();
-            throw new Error("Song file 95 MB-er beshi.");
+            throw new Error("Song file 25 MB-er beshi.");
         }
 
         let downloaded = 0;
@@ -258,7 +258,7 @@ async function sendFirstSong(api, event, track) {
                 downloaded += chunk.length;
 
                 if (downloaded > MAX_SIZE) {
-                    const error = new Error("Song file 95 MB-er beshi.");
+                    const error = new Error("Song file 25 MB-er beshi.");
                     response.data.destroy(error);
                     writer.destroy(error);
                 }
@@ -278,7 +278,7 @@ async function sendFirstSong(api, event, track) {
         const stat = await fs.stat(file);
 
         if (stat.size > MAX_SIZE) {
-            throw new Error("Song file 95 MB-er beshi.");
+            throw new Error("Song file 25 MB-er beshi.");
         }
 
         const duration = formatDuration(track.duration);
