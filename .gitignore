@@ -1,0 +1,15 @@
+Node_modules/
+package-lock.json
+npm-shrinkwrap.json
+yarn.lock
+data/*.json
+data/*.jsonl
+*.log
+.DS_Store
+instabot-live-send.json
+
+.env
+.env.*
+
+# local test junk
+tmp/
