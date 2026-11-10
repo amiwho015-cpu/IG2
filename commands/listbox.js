@@ -1,13 +1,13 @@
 "use strict";
 
-const { listGroups, joinUser } = require("../src/groupUtil");
+const { listGroups, listPending, markHandled, joinUser } = require("../src/groupUtil");
 
 const LIMIT = 10;
 
 function pageText(groups, page, totalPages) {
 	const slice = groups.slice((page - 1) * LIMIT, page * LIMIT);
-	const lines = slice.map((g, i) => `${(page - 1) * LIMIT + i + 1}. ${g.name || "Unnamed Group"} (${g.threadID})`);
-	return `Groups ${page}/${totalPages} (${groups.length})\n${lines.join("\n")}\nnext / back / <page> | left <num> | join <num> [uid]`;
+	const lines = slice.map((g, i) => `${(page - 1) * LIMIT + i + 1}. ${g.pending ? "⏳ " : ""}${g.name || "Unnamed Group"} (${g.threadID})${g.pending ? " [request]" : ""}`);
+	return `Groups ${page}/${totalPages} (${groups.length})\n${lines.join("\n")}\nnext / back / <page> | left <num> | join <num> [uid]\n⏳ = request box (join approves it first)`;
 }
 
 module.exports = {
@@ -26,6 +26,12 @@ module.exports = {
 
 	onStart: async function ({ api, event, args, message, threadsData, commandName }) {
 		const groups = await listGroups(api, threadsData);
+		// Groups waiting in the request box are listed after the normal ones.
+		try {
+			const known = new Set(groups.map(g => g.threadID));
+			for (const g of await listPending(api)) if (!known.has(g.threadID)) groups.push(Object.assign({}, g, { pending: true }));
+		}
+		catch (_) { /* request box not readable: show the normal groups only */ }
 		if (!groups.length) return message.reply("No group chats found.");
 
 		const totalPages = Math.ceil(groups.length / LIMIT);
@@ -56,7 +62,10 @@ module.exports = {
 			for (const n of nums) {
 				const g = pick(n);
 				if (!g) { failed.push(`#${n} (no such number)`); continue; }
-				try { await api.leaveGroup(g.threadID); left++; }
+				try {
+					if (g.pending) { try { await api.handleMessageRequest(g.threadID, false); } catch (_) { /* optional */ } markHandled(g.threadID); }
+					await api.leaveGroup(g.threadID); left++;
+				}
 				catch (error) { failed.push(`#${n} (${(error && (error.error || error.message)) || error})`); }
 			}
 			return message.reply(`✅ Left ${left} group(s).` + (failed.length ? `\n❌ Failed: ${failed.join(", ")}` : ""));
@@ -68,6 +77,12 @@ module.exports = {
 			const uid = /^\d+$/.test(parts[2] || "") ? parts[2] : event.senderID;
 			const label = g.name || g.threadID;
 			try {
+				// A request-box group is approved first, then the member is added.
+				if (g.pending) {
+					try { await api.handleMessageRequest(g.threadID, true); } catch (_) { /* replying also approves it */ }
+					markHandled(g.threadID);
+					g.pending = false;
+				}
 				const res = await joinUser(api, uid, g.threadID);
 				if (res.already) return message.reply(`ℹ️ Already in "${label}".`);
 				return message.reply(`✅ Added to "${label}".${res.followed ? " (bot followed the account first)" : ""}`);
