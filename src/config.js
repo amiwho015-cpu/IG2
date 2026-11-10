@@ -109,14 +109,14 @@ function loadConfig() {
 	config.server.timeout = Number(config.server.timeout) || 60000;
 	// "direct" = log in with the local ig-chat-api package (like Insta-Bot3);
 	// anything else = use the hosted server above. IG_MODE overrides the file.
-	// The old hosted ICA server is dead, so every deploy uses the built-in ICA (lib/instagram-chat-api)
+	// The old hosted ICA server is dead, so every deploy uses the built-in instagram-chatkit (lib/instagram-chatkit)
 	// no matter what stale IG_MODE / IG_API_SERVER variables or config.json say.
 	// Only IG_FORCE_MODE=1 lets IG_MODE (or config.server.mode) pick "direct" / "server".
 	const modeEnv = process.env.IG_MODE && process.env.IG_MODE.trim().toLowerCase();
 	const fileMode = String(config.server.mode || "").toLowerCase();
-	const validModes = ["instachat", "ica", "direct", "server"];
+	const validModes = ["chatkit", "ica", "instachat", "direct", "server"];
 	const forced = process.env.IG_FORCE_MODE === "1";
-	config.server.mode = forced ? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "ica")) : "ica";
+	config.server.mode = forced ? (validModes.includes(modeEnv) ? modeEnv : (validModes.includes(fileMode) ? fileMode : "chatkit")) : "chatkit";
 	// instachat-api (vendored in lib/instachat-api): polling + send throttle settings.
 	const ic = config.instachat && typeof config.instachat === "object" ? config.instachat : {};
 	config.instachat = ic;
@@ -134,13 +134,21 @@ function loadConfig() {
 	// Typing indicator shown before the bot sends anything (toggle: `typingindicator`).
 	config.typingIndicator = config.typingIndicator || {};
 	if (config.typingIndicator.enable == null) config.typingIndicator.enable = true;
-	if (!(Number(config.typingIndicator.duration) > 0)) config.typingIndicator.duration = 1000;
+	if (!(Number(config.typingIndicator.duration) > 0)) config.typingIndicator.duration = 400;
 
 	// Welcome / leave announcements for group threads.
 	config.welcome = config.welcome || {};
 	if (config.welcome.enable == null) config.welcome.enable = true;
 	if (!config.welcome.message) config.welcome.message = "Welcome %1 to %2! 👋";
 	if (!Array.isArray(config.welcome.threadIDs)) config.welcome.threadIDs = [];
+
+	// Anyone who swears at the bot gets `warnLimit` warnings, then is banned from using it.
+	config.abuse = config.abuse || {};
+	if (config.abuse.enable == null) config.abuse.enable = true;
+	if (!Number.isInteger(config.abuse.warnLimit) || config.abuse.warnLimit < 1) config.abuse.warnLimit = 2;
+	if (!config.abuse.reason) config.abuse.reason = "you are biggest motherchod";
+	if (!Array.isArray(config.abuse.extraWords)) config.abuse.extraWords = [];
+	if (config.abuse.threadIDs != null && !Array.isArray(config.abuse.threadIDs)) config.abuse.threadIDs = [];
 
 	config.leave = config.leave || {};
 	if (config.leave.enable == null) config.leave.enable = true;

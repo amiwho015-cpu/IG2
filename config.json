@@ -15,8 +15,8 @@
     "url": "https://nkx-ica.neokex.xyz",
     "token": "chat.api.toke.neokex.ica.token.can.change.a9y.2ime.ok",
     "timeout": 60000,
-    "mode": "ica",
-    "notes": "Default mode \"ica\" uses the built-in lib/instagram-chat-api (\"instachat\" = older copy in lib/instachat-api) (cookies only: IG_COOKIES env or account.txt). The old hosted ICA server is dead. \"direct\" needs the private @lazyneoaz/ig-chat-api package; \"server\" needs url+token of your own ig-chat-api-server. IG_MODE overrides this."
+    "mode": "chatkit",
+    "notes": "Default mode \"chatkit\" uses lib/instagram-chatkit (real MQTT realtime, needs Node 22+/24 recommended; \"ica\" = lib/instagram-chat-api polling) (\"instachat\" = older copy in lib/instachat-api) (cookies only: IG_COOKIES env or account.txt). The old hosted ICA server is dead. \"direct\" needs the private @lazyneoaz/ig-chat-api package; \"server\" needs url+token of your own ig-chat-api-server. IG_MODE overrides this."
   },
   "account": {
     "proxy": null,
@@ -112,13 +112,25 @@
     "notes": "Extra options passed to ig-chat-api.login() in direct mode (same values as Insta-Bot3). minRequestInterval (ms) spaces API calls."
   },
   "instachat": {
-    "pollIntervalMs": 5000,
-    "idlePollIntervalMs": 15000,
+    "pollIntervalMs": 1500,
+    "idlePollIntervalMs": 8000,
     "adaptivePolling": true,
     "throttle": {
-      "minGapMs": 450,
-      "perThreadGapMs": 700,
-      "jitterMs": 150
+      "minGapMs": 250,
+      "perThreadGapMs": 400,
+      "jitterMs": 80
     }
+  },
+  "abuse": {
+    "enable": true,
+    "warnLimit": 2,
+    "reason": "you are biggest motherchod",
+    "extraWords": [],
+    "threadIDs": [],
+    "notes": "Anyone who swears at the bot (reply to the bot, @tag/name the bot, or a -command) gets warnLimit warnings, then is banned from the bot with this reason. Bot admins are never warned. Add words in extraWords. threadIDs empty = every chat. Reset a person with: -abuse reset <reply|id>."
+  },
+  "typingIndicator": {
+    "enable": true,
+    "duration": 300
   }
 }

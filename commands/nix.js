@@ -228,6 +228,55 @@ function buildPrompt({ rec, name, username, thread, text, day, language }) {
 	return prompt;
 }
 
+/* ------------------------------------------- saved GC conversations (fallback) */
+
+// Everything people say to Nix in a group, with Nix's answer, is saved per group. When the chat
+// API is down, Nix answers from the closest saved exchange instead of just saying "error".
+const SAVED_KEPT = 250;       // exchanges kept per group
+const SAVED_Q = 200;
+const SAVED_A = 500;
+
+const tokensOf = text => normText(text).split(" ").filter(w => w.length >= 2);
+
+function saveExchange(thread, question, answer, who) {
+	if (!Array.isArray(thread.saved)) thread.saved = [];
+	const q = shorten(question, SAVED_Q);
+	const a = shorten(answer, SAVED_A);
+	if (!q || !a) return;
+	// same question again: keep only the newest answer
+	const key = normText(q);
+	const at = thread.saved.findIndex(x => normText(x.q) === key);
+	if (at !== -1) thread.saved.splice(at, 1);
+	thread.saved.push({ q, a, n: who || "", at: Date.now() });
+	if (thread.saved.length > SAVED_KEPT) thread.saved.splice(0, thread.saved.length - SAVED_KEPT);
+}
+
+/** Best saved answer for `text`: this group first, then every group. Random saved line if nothing is close. */
+function savedAnswer(threadID, text) {
+	const mem = load();
+	const want = new Set(tokensOf(text));
+	const pools = [(mem.threads[String(threadID)] || {}).saved || []];
+	for (const [tid, t] of Object.entries(mem.threads)) if (tid !== String(threadID) && Array.isArray(t.saved)) pools.push(t.saved);
+
+	let best = null;
+	let bestScore = 0;
+	pools.forEach((pool, poolIndex) => {
+		for (const item of pool) {
+			const have = new Set(tokensOf(item.q));
+			if (!have.size || !want.size) continue;
+			let hit = 0;
+			for (const w of want) if (have.has(w)) hit++;
+			const score = hit / Math.sqrt(want.size * have.size) + (poolIndex === 0 ? 0.05 : 0);
+			if (score > bestScore) { bestScore = score; best = item; }
+		}
+	});
+	if (best && bestScore >= 0.3) return best.a;
+
+	const own = pools[0];
+	if (own.length) return own[Math.floor(Math.random() * own.length)].a;
+	return null;
+}
+
 /* ----------------------------------------------- replies to Nix's messages */
 
 // Letters and digits only: emoji, "…" and punctuation can come back slightly different from Instagram.
@@ -319,6 +368,13 @@ async function chat({ event, message, usersData, text, api }) {
 	try { reply = await askApi(prompt); }
 	catch (error) {
 		console.error("[nix] API error:", error.message);
+		// The chat API did not answer: reply from what was saved in this group earlier.
+		const saved = savedAnswer(threadID, text);
+		if (saved) {
+			rememberReply(thread, saved);
+			save();
+			return message.reply(saved);
+		}
 		save();
 		return message.reply(lang.FAIL[language] || lang.FAIL.banglish);
 	}
@@ -336,6 +392,7 @@ async function chat({ event, message, usersData, text, api }) {
 	thread.history.push({ n: label, t: shorten(text, 200) }, { n: "Nix", t: shorten(reply, 200) });
 	if (thread.history.length > HISTORY_KEPT) thread.history.splice(0, thread.history.length - HISTORY_KEPT);
 	rememberReply(thread, reply);
+	saveExchange(thread, text, reply, label);
 	save();
 
 	return message.reply(reply);

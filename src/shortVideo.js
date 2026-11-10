@@ -12,7 +12,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const MAX_SECONDS = 15;
-const MAX_BYTES = 40 * 1024 * 1024;
+const MAX_BYTES = 95 * 1024 * 1024;
 const AUTODL_API = "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldl";
 const AUTODL_API_BACKUP = "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldlv2";
 const SEARCH_API = "https://toshiro-api-editz6t9.vercel.app/api/search/tiksearch";
@@ -44,7 +44,7 @@ async function fetchFile(url) {
 		try {
 			const headers = { "User-Agent": UA, Accept: "*/*" };
 			if (referer) headers.Referer = referer;
-			const res = await axios.get(url, { responseType: "arraybuffer", timeout: 60000, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES, headers });
+			const res = await axios.get(url, { responseType: "arraybuffer", timeout: 240000, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES, headers });
 			const buffer = Buffer.from(res.data);
 			if (!buffer.length) throw new Error("empty video");
 			return buffer;
@@ -132,7 +132,7 @@ async function autodlDownload(link, trim = true) {
 
 // ---- search APIs on the same toshiro host autodl uses (tiksearch, ani) ----
 
-const searchParams = {}; // endpoint -> the parameter name that worked once
+const searchParams = { [ANI_API]: "keyword" }; // endpoint -> the parameter name that worked (ani is documented: ?keyword=)
 const PAGE_RE = /tiktok\.com\/(@[^/]+\/video\/\d+|t\/)|vm\.tiktok\.com|vt\.tiktok\.com/i;
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
 const isHttp = v => typeof v === "string" && /^https?:\/\//i.test(v);
@@ -180,7 +180,8 @@ function toCandidate(item) {
 }
 
 async function searchApi(endpoint, query, tag) {
-	const names = searchParams[endpoint] ? [searchParams[endpoint]] : SEARCH_PARAMS;
+	// the known-good name goes first; the others stay as a fallback in case the API changes
+	const names = searchParams[endpoint] ? [searchParams[endpoint], ...SEARCH_PARAMS.filter(n => n !== searchParams[endpoint])] : SEARCH_PARAMS;
 	let reason = "no results";
 	for (const name of names) {
 		let res;

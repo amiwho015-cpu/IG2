@@ -15,9 +15,12 @@ const fs = require("fs");
 const path = require("path");
 const log = require("./logger");
 
-const instachatLib = require("../lib/instachat-api/src");
+let instachatLib = null;   // lib/instachat-api, loaded lazily (default for the "instachat" mode)
+const getInstachatLib = () => instachatLib || (instachatLib = require("../lib/instachat-api/src"));
 let icaLib = null;   // lib/instagram-chat-api, loaded lazily (only for mode "ica")
 const getIcaLib = () => icaLib || (icaLib = require("../lib/instagram-chat-api/src"));
+let chatkitLib = null;   // lib/instagram-chatkit through src/chatkitClient.js (mode "chatkit")
+const getChatkitLib = () => chatkitLib || (chatkitLib = (() => { const m = require("./chatkitClient"); return { InstaChatClient: m.ChatkitClient, Events: m.Events }; })());
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const str = v => (v == null ? "" : String(v));
@@ -91,7 +94,8 @@ function mapUser(user, fallbackId) {
 async function login(params) {
 	const { cookies, reloadCookies, config = {}, ClientClass, lib } = params;
 	const useIca = lib === "ica";
-	const { InstaChatClient, Events } = useIca ? getIcaLib() : instachatLib;
+	const useChatkit = lib === "chatkit";
+	const { InstaChatClient, Events } = useChatkit ? getChatkitLib() : (useIca ? getIcaLib() : getInstachatLib());
 	const settings = Object.assign({}, config.instachat || {});
 
 	const map = cookiesToMap(cookies);
@@ -135,6 +139,18 @@ async function login(params) {
 		metaOf.set(key, { senderId: senderId ? str(senderId) : prev.senderId, text: text || prev.text || "" });
 		if (metaOf.size > 20000) metaOf.delete(metaOf.keys().next().value);
 	};
+	// messageID -> mapped attachments (photos/videos). Lets "reply to a photo" commands (edit, pfp
+	// tools, pattu add ...) read the media of the message that was replied to: Instagram's reply
+	// payload only carries the quoted id, never the picture itself.
+	const mediaOf = new Map();
+	const rememberMedia = (ids, list) => {
+		if (!Array.isArray(list) || !list.length) return;
+		for (const id of ids) {
+			if (!id) continue;
+			mediaOf.set(str(id), list);
+			if (mediaOf.size > 5000) mediaOf.delete(mediaOf.keys().next().value);
+		}
+	};
 	const sentByBot = new Set();
 	const rememberSent = id => {
 		if (!id) return;
@@ -148,7 +164,7 @@ async function login(params) {
 	};
 
 	await client.connect();
-	log.success("LOGIN", `${useIca ? "instagram-chat-api (ICA)" : "instachat-api"} connected as @${client.username || "?"} (${client.userId})`);
+	log.success("LOGIN", `${useChatkit ? "instagram-chatkit (MQTT)" : (useIca ? "instagram-chat-api (ICA)" : "instachat-api")} connected as @${client.username || "?"} (${client.userId})`);
 
 	const api = {
 		client, // escape hatch for new commands: api.client.sendHuman(...), api.client.awaitMessage(...), ...
@@ -460,6 +476,16 @@ async function login(params) {
 		api[name]._unsupported = true;
 	}
 
+	if (useChatkit) {
+		// chatkit can do these (the shared instachat stubs above say "unsupported").
+		api.changeBio = (text, ...rest) => bridge(() => client.changeBio(text), findCb(...rest));
+		api.changeThreadEmoji = (emoji, threadID, ...rest) => bridge(() => client.setThreadEmoji(str(threadID), emoji), findCb(...rest));
+		delete api.changeBio._unsupported;
+		delete api.changeThreadEmoji._unsupported;
+		api.sendGif = (threadID, query, ...rest) => bridge(() => client.sendGif(str(threadID), query), findCb(...rest));
+		api.sendSticker = (threadID, stickerId, ...rest) => bridge(() => client.sendSticker(str(threadID), stickerId), findCb(...rest));
+	}
+
 	api.logout = async () => { await client.disconnect(); };
 
 	/**
@@ -508,6 +534,17 @@ async function login(params) {
 		return c ? str(c) : "";
 	};
 
+	/** Picture links inside the quoted message object Instagram attaches to a reply (when it does). */
+	function mediaFromRaw(v, depth = 0, out = []) {
+		if (!v || typeof v !== "object" || depth > 5 || out.length >= 4) return out;
+		const cand = v.image_versions2 && Array.isArray(v.image_versions2.candidates) ? v.image_versions2.candidates : null;
+		if (cand && cand[0] && cand[0].url) { out.push({ type: "photo", url: cand[0].url, previewUrl: cand[0].url }); return out; }
+		if (typeof v.image_url === "string" && /^https?:/i.test(v.image_url)) { out.push({ type: "photo", url: v.image_url, previewUrl: v.image_url }); return out; }
+		if (Array.isArray(v)) v.forEach(x => mediaFromRaw(x, depth + 1, out));
+		else Object.keys(v).forEach(k => mediaFromRaw(v[k], depth + 1, out));
+		return out;
+	}
+
 	/** Look for a reply reference anywhere in a raw Instagram item (names differ between endpoints). */
 	function deepReplyRef(raw, depth = 0) {
 		if (!raw || typeof raw !== "object" || depth > 3) return null;
@@ -515,7 +552,7 @@ async function login(params) {
 			const v = raw[key];
 			if (REPLY_KEY.test(key) && v && typeof v === "object") {
 				const id = v.item_id || v.message_id || v.id || v.client_context;
-				if (id) return { id: str(id), sender: pickSender(v), text: v.text || v.text_body || (v.content && v.content.text_body) || "" };
+				if (id) return { id: str(id), sender: pickSender(v), text: v.text || v.text_body || (v.content && v.content.text_body) || "", media: mediaFromRaw(v) };
 			}
 			if (/^(replied_to_message_id|reply_to_message_id|replied_to_item_id|reply_to_item_id|reply_item_id)$/i.test(key) && (typeof v === "string" || typeof v === "number") && v) {
 				return { id: str(v), sender: str(raw.replied_to_user_id || raw.reply_to_user_id || ""), text: "" };
@@ -550,6 +587,7 @@ async function login(params) {
 			if (!mid) continue;
 			const sid = m.senderId || m.userId || (m.sender && m.sender.id);
 			if (sid) rememberMeta(mid, sid, m.text || "");
+			try { rememberMedia([mid, m.itemId], mapAttachments(m)); } catch (_) { /* media is optional */ }
 			if (wantId && mid === str(wantId)) found = m;
 		}
 		return found;
@@ -570,7 +608,7 @@ async function login(params) {
 		if (!ref && !msg.isSelf && (looksLikeCommand(msg.text) || plainLookup)) {
 			for (let attempt = 0; attempt < (plainLookup ? 1 : 2) && !ref; attempt++) {
 				try {
-					if (attempt) await sleep(900);
+					if (attempt) await sleep(350);
 					ref = refFromMessage(await readHistory(msg.threadId, msg.id));
 					if (ref) ref.source = "history";
 				}
@@ -596,7 +634,13 @@ async function login(params) {
 			}
 			catch (_) { /* keep what we have */ }
 		}
-		return { id: rid, sender: sender || "", text, source: sender ? source : source + " (sender unknown)" };
+		let attachments = (ref.media && ref.media.length ? ref.media : null) || mediaOf.get(rid) || [];
+		// A quoted message without text is probably a picture: re-read the thread to learn it.
+		if (!attachments.length && !text) {
+			try { await readHistory(msg.threadId, null); attachments = mediaOf.get(rid) || []; }
+			catch (_) { /* keep what we have */ }
+		}
+		return { id: rid, sender: sender || "", text, attachments, source: sender ? source : source + " (sender unknown)" };
 	}
 
 	function messageEvent(msg, replied) {
@@ -618,7 +662,7 @@ async function login(params) {
 				messageID: replied.id,
 				senderID: replied.sender,
 				body: replied.text,
-				attachments: [],
+				attachments: Array.isArray(replied.attachments) ? replied.attachments : [],
 				timestamp: null
 			};
 		}
@@ -637,6 +681,7 @@ async function login(params) {
 		if (!msg) return;
 		remember(msg.id, msg.threadId);
 		rememberMeta(msg.id, msg.isSelf ? client.userId : msg.senderId, msg.text || "");
+		try { rememberMedia([msg.id, msg.itemId], mapAttachments(msg)); } catch (_) { /* media is optional */ }
 		if (msg.isSelf) {
 			// Our own sends come back through polling; give send() a moment to register the id,
 			// then only deliver messages typed from another device (and only with selfListen).

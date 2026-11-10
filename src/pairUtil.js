@@ -75,4 +75,29 @@ async function safeThreadInfo(api, threadID, event) {
 	return Object.assign({}, info || {}, { participantIDs: ids });
 }
 
-module.exports = { safeLoadImage, safeLoadBackground, safeThreadInfo };
+/**
+ * Who a pair card is about when people are @tagged:
+ *   2 tags  -> first tag + second tag
+ *   1 tag   -> the sender (or the replied-to person) + the tagged one
+ * Returns { targetID, partnerID } or null (no tags: the command picks a random partner).
+ */
+function explicitPair(event, currentTargetID) {
+	const tagged = Object.keys((event && event.mentions) || {}).map(String).filter(Boolean);
+	if (!tagged.length) return null;
+	if (tagged.length >= 2) return { targetID: tagged[0], partnerID: tagged[1] };
+	if (String(tagged[0]) === String(currentTargetID)) return null;
+	return { targetID: String(currentTargetID), partnerID: tagged[0] };
+}
+
+/** me / partner objects ({ id, name, gender }) for two known people, no gender matching needed. */
+async function bothKnown(usersData, targetID, partnerID) {
+	const { resolveGender } = require("./gender");
+	const a = await resolveGender(usersData, String(targetID));
+	const b = await resolveGender(usersData, String(partnerID));
+	return {
+		me: { id: String(targetID), name: a.name || "User", gender: a.gender },
+		partner: { id: String(partnerID), name: b.name || `User ${partnerID}`, gender: b.gender }
+	};
+}
+
+module.exports = { safeLoadImage, safeLoadBackground, safeThreadInfo, explicitPair, bothKnown };

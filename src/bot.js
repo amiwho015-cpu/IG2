@@ -45,6 +45,10 @@ function resolveLogin(config) {
 		const cookies = () => loadAccount();
 		return { login: () => igAdapter.login({ cookies: cookies(), config, reloadCookies: cookies }), mode: "instachat" };
 	}
+	if (server.mode === "chatkit") {
+		const cookies = () => loadAccount();
+		return { login: () => igAdapter.login({ cookies: cookies(), config, reloadCookies: cookies, lib: "chatkit" }), mode: "chatkit" };
+	}
 	if (server.mode === "ica") {
 		const cookies = () => loadAccount();
 		return { login: () => igAdapter.login({ cookies: cookies(), config, reloadCookies: cookies, lib: "ica" }), mode: "ica" };
@@ -94,7 +98,11 @@ function normalizeEvent(event) {
 			messageID: replied.messageID || null,
 			senderID: replied.senderID != null ? String(replied.senderID) : null,
 			body: replied.body != null ? String(replied.body) : "",
-			attachments: Array.isArray(replied.attachments) ? replied.attachments : [],
+			attachments: (Array.isArray(replied.attachments) ? replied.attachments : []).map(att => {
+				if (!att || typeof att !== "object") return att;
+				const type = att.type === "image" ? "photo" : att.type === "gif" ? "animated_image" : att.type;
+				return Object.assign({}, att, { type });
+			}),
 			timestamp: replied.timestamp || null
 		};
 		if (normalized.type === "message") normalized.type = "message_reply";
@@ -269,6 +277,12 @@ function createBot(config) {
 				onlineStatus.start();
 				resolve(api);
 			};
+
+			if (mode === "chatkit") {
+				log.info("LOGIN", "Connecting with instagram-chatkit (realtime MQTT, cookies)");
+				Promise.resolve(login()).then(api => finish(null, api), finish);
+				return;
+			}
 
 			if (mode === "ica") {
 				log.info("LOGIN", "Connecting with the built-in instagram-chat-api / ICA (cookies)");

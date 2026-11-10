@@ -123,6 +123,70 @@ async function download(url) {
 }
 
 /**
+ * GET an endpoint with a prompt AND a source picture link (image editing). The parameter
+ * names are not documented, so the usual pairs are tried and the working pair is remembered.
+ */
+const IMG_PARAMS = ["img", "image", "url", "imageUrl", "image_url", "link"];
+const PROMPT_PARAMS = ["prompt", "query", "text", "q"];
+async function callEdit(endpoint, prompt, imageUrl, timeout = 240000) {
+	const key = endpoint + "#edit";
+	const combos = [];
+	if (working[key]) combos.push(working[key]);
+	else for (const i of IMG_PARAMS) for (const p of PROMPT_PARAMS) combos.push([i, p]);
+	let reason = "no response";
+	for (const [imgName, promptName] of combos) {
+		let res;
+		try {
+			res = await axios.get(BASE + endpoint, {
+				params: { [promptName]: prompt, [imgName]: imageUrl }, responseType: "arraybuffer", timeout,
+				maxContentLength: 40 * 1024 * 1024, validateStatus: () => true
+			});
+		}
+		catch (e) {
+			reason = `request failed: ${(e && e.message) || e}`;
+			if (e && (e.code === "ECONNABORTED" || /timeout/i.test(String(e.message)))) break; // the server is working on it, not a wrong name
+			continue;
+		}
+		const buffer = Buffer.from(res.data);
+		if (res.status >= 400) { reason = reasonOf(buffer, res.status); continue; }
+		working[key] = [imgName, promptName];
+		return { buffer, type: String(res.headers["content-type"] || "") };
+	}
+	throw new Error(reason);
+}
+
+async function imagesFromResponse(r, opts = {}) {
+	const { count = 1, random = true } = opts;
+	if (/^image\//i.test(r.type)) return [{ buffer: r.buffer, ext: extOf(r.buffer, r.type) }];
+
+	let data;
+	try { data = JSON.parse(r.buffer.toString("utf8")); }
+	catch (_) { throw new Error(`unexpected answer: ${reasonOf(r.buffer, 0)}`); }
+
+	let urls = imageUrls(data);
+	if (!urls.length) throw new Error(`no picture in the answer (${reasonOf(r.buffer, 0)})`);
+	if (random) urls = shuffle(urls);
+
+	const out = [];
+	let lastError;
+	for (const url of urls.slice(0, count * 3)) {
+		try { out.push(await download(url)); }
+		catch (e) { lastError = e; }
+		if (out.length >= count) break;
+	}
+	if (!out.length) throw new Error(`could not download the picture (${(lastError && lastError.message) || "failed"})`);
+	return out;
+}
+
+/** Edit a picture: returns up to `count` { buffer, ext }. */
+async function editImages(endpoint, prompt, imageUrl, opts = {}) {
+	// Midjourney has no separate image field: the picture link simply leads the prompt.
+	if (opts.mj || !imageUrl) return fetchImages(endpoint, prompt, { count: opts.count || 1, random: false, timeout: opts.timeout || 300000 });
+	const r = await callEdit(endpoint, prompt, imageUrl, opts.timeout || 240000);
+	return imagesFromResponse(r, { count: opts.count || 1, random: false });
+}
+
+/**
  * Ask an endpoint for pictures. Returns up to `count` { buffer, ext }.
  * opts: count (default 1), random (shuffle the results), timeout (ms).
  */
@@ -150,4 +214,4 @@ async function fetchImages(endpoint, query, opts = {}) {
 	return out;
 }
 
-module.exports = { fetchImages, shuffle };
+module.exports = { fetchImages, editImages, shuffle };
