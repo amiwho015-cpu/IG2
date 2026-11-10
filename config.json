@@ -112,8 +112,8 @@
     "notes": "Extra options passed to ig-chat-api.login() in direct mode (same values as Insta-Bot3). minRequestInterval (ms) spaces API calls."
   },
   "instachat": {
-    "pollIntervalMs": 2000,
-    "idlePollIntervalMs": 8000,
+    "pollIntervalMs": 5000,
+    "idlePollIntervalMs": 15000,
     "adaptivePolling": true,
     "throttle": {
       "minGapMs": 450,
