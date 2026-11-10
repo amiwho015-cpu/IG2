@@ -47,7 +47,7 @@ const CATEGORIES = {
 const NAMES = Object.keys(CATEGORIES).map(n => (n === "football2" ? "players" : n));
 const KEYS = Object.keys(CATEGORIES);
 const PER_PAGE = 10;
-const MAX_BYTES = 40 * 1024 * 1024;
+const MAX_BYTES = 95 * 1024 * 1024;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const HOSTS = ["https://www.tikwm.com", "https://tikwm.com"];
 
@@ -115,7 +115,7 @@ async function download(url) {
 			const headers = { "User-Agent": UA, Accept: "*/*" };
 			if (referer) headers.Referer = referer;
 			const res = await axios.get(url, {
-				responseType: "arraybuffer", timeout: 60000, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES, headers
+				responseType: "arraybuffer", timeout: 240000, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES, headers
 			});
 			const buffer = Buffer.from(res.data);
 			if (!buffer.length) throw new Error("empty video");

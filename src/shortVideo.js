@@ -12,7 +12,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const MAX_SECONDS = 15;
-const MAX_BYTES = 40 * 1024 * 1024;
+const MAX_BYTES = 95 * 1024 * 1024;
 const AUTODL_API = "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldl";
 const AUTODL_API_BACKUP = "https://toshiro-api-editz6t9.vercel.app/api/downloader/alldlv2";
 const SEARCH_API = "https://toshiro-api-editz6t9.vercel.app/api/search/tiksearch";
@@ -44,7 +44,7 @@ async function fetchFile(url) {
 		try {
 			const headers = { "User-Agent": UA, Accept: "*/*" };
 			if (referer) headers.Referer = referer;
-			const res = await axios.get(url, { responseType: "arraybuffer", timeout: 60000, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES, headers });
+			const res = await axios.get(url, { responseType: "arraybuffer", timeout: 240000, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES, headers });
 			const buffer = Buffer.from(res.data);
 			if (!buffer.length) throw new Error("empty video");
 			return buffer;
