@@ -127,6 +127,8 @@ module.exports = {
     let processing = null;
     try { processing = await message.reply("🚀 | Processing your image, please wait..."); } catch (_) { /* optional */ }
 
+    // One attempt with one model. Throws on failure so the caller can try a backup model.
+    const attempt = async (model, note) => {
     let filePath;
     try {
       if (model.kind === "toshiro" || model.kind === "mj") {
@@ -137,7 +139,7 @@ module.exports = {
         nkx.react(api, messageID, "✅");
         if (processing && processing.messageID) { try { await api.unsendMessage(processing.messageID); } catch (_) { /* already gone */ } }
         await message.reply({
-          body: `✨ 𝗜𝗠𝗔𝗚𝗘 𝗘𝗗𝗜𝗧𝗘𝗗 ✨\n━━━━━━━━━━━━━━━━━━━\n${model.tag} ${model.name}\nPrompt: ${parsed.prompt}${model.kind === "mj" ? "\n⚠️ Midjourney photo edit korte pare na (text theke notun chhobi banay). Asol edit-er jonno --m 14 ba --m 1-13 use koro." : ""}`,
+          body: `✨ 𝗜𝗠𝗔𝗚𝗘 𝗘𝗗𝗜𝗧𝗘𝗗 ✨\n━━━━━━━━━━━━━━━━━━━\n${model.tag} ${model.name}${note || ""}\nPrompt: ${parsed.prompt}${model.kind === "mj" ? "\n⚠️ Midjourney photo edit korte pare na (text theke notun chhobi banay). Asol edit-er jonno --m 14 ba --m 1-13 use koro." : ""}`,
           attachment: images.map((im, i) => ({ buffer: im.buffer, fileName: `edit${i + 1}.${im.ext}` }))
         });
         return;
@@ -157,17 +159,42 @@ module.exports = {
       nkx.react(api, messageID, "✅");
       if (processing && processing.messageID) { try { await api.unsendMessage(processing.messageID); } catch (_) { /* already gone */ } }
       await message.reply({
-        body: `✨ 𝗜𝗠𝗔𝗚𝗘 𝗘𝗗𝗜𝗧𝗘𝗗 ✨\n━━━━━━━━━━━━━━━━━━━\n${model.tag} ${model.name}${photos.length > 1 ? " · 2 photos" : ""}\nPrompt: ${parsed.prompt}`,
+        body: `✨ 𝗜𝗠𝗔𝗚𝗘 𝗘𝗗𝗜𝗧𝗘𝗗 ✨\n━━━━━━━━━━━━━━━━━━━\n${model.tag} ${model.name}${note || ""}${photos.length > 1 ? " · 2 photos" : ""}\nPrompt: ${parsed.prompt}`,
         attachment: fs.createReadStream(filePath)
       });
-    } catch (err) {
-      console.error("[edit] Error:", err.response?.data || err.message);
-      nkx.react(api, messageID, "❌");
-      if (processing && processing.messageID) { try { await api.unsendMessage(processing.messageID); } catch (_) { /* already gone */ } }
-      const msg = err.code === "ECONNABORTED" ? "⏱️ | Request Timeout: the server took too long." : `🚫 | ${model.name} failed: ${err.message}`;
-      return message.reply(msg);
     } finally {
       if (filePath) { const t = setTimeout(() => fs.remove(filePath).catch(() => { }), 15000); if (t.unref) t.unref(); }
     }
+    };
+
+    // If a provider is out of credit / overloaded, silently try backup models before giving up.
+    const FALLBACK_RE = /afford|credit|quota|balance|insufficient|no account|rate.?limit|capacity|overload|unavailable|too many|\b(429|500|502|503|504)\b/i;
+    const PRIORITY = [14, 1, 2, 3, 9, 8, 13, 12, 5, 4];
+    const chain = [model].concat(
+      PRIORITY.map(id => MODELS.find(m => m.id === id))
+        .filter(m => m && m.id !== model.id && m.maxImages >= photos.length)
+    ).slice(0, 4);
+
+    let lastError = null;
+    let lastModel = model;
+    for (let i = 0; i < chain.length; i++) {
+      lastModel = chain[i];
+      try {
+        await attempt(chain[i], i ? ` (auto: ${model.name} unavailable)` : "");
+        return;
+      }
+      catch (err) {
+        lastError = err;
+        console.error(`[edit] ${chain[i].name} failed:`, err.response?.data || err.message);
+        const text = `${err.message || ""} ${JSON.stringify((err.response && err.response.data && !Buffer.isBuffer(err.response.data)) ? err.response.data : "")}`;
+        if (err.code === "ECONNABORTED" || !FALLBACK_RE.test(text)) break;
+      }
+    }
+
+    nkx.react(api, messageID, "❌");
+    if (processing && processing.messageID) { try { await api.unsendMessage(processing.messageID); } catch (_) { /* already gone */ } }
+    const err = lastError || new Error("unknown error");
+    const msg = err.code === "ECONNABORTED" ? "⏱️ | Request Timeout: the server took too long." : `🚫 | ${lastModel.name} failed: ${err.message}\n(backup model gulo-o try kora hoyechilo)`;
+    return message.reply(msg);
   }
 };

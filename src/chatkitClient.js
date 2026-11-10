@@ -289,7 +289,9 @@ class ChatkitClient extends EventEmitter {
 		if (/^\d+$/.test(id) || !id) {
 			// numeric = Iris item id: find its web MID in the history.
 			await this._scanHistory(native);
-			const found = this.itemToMid.get(id);
+			let found = this.itemToMid.get(id);
+			// An older message (a reaction on something sent a while ago): look further back once.
+			if (!found) { await this._scanHistory(native, 100); found = this.itemToMid.get(id); }
 			if (found) return found;
 			throw new Error(`No web message id known for message ${id} yet (Instagram has not sent it).`);
 		}
