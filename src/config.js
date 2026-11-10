@@ -142,6 +142,14 @@ function loadConfig() {
 	if (!config.welcome.message) config.welcome.message = "Welcome %1 to %2! 👋";
 	if (!Array.isArray(config.welcome.threadIDs)) config.welcome.threadIDs = [];
 
+	// Anyone who swears at the bot gets `warnLimit` warnings, then is banned from using it.
+	config.abuse = config.abuse || {};
+	if (config.abuse.enable == null) config.abuse.enable = true;
+	if (!Number.isInteger(config.abuse.warnLimit) || config.abuse.warnLimit < 1) config.abuse.warnLimit = 2;
+	if (!config.abuse.reason) config.abuse.reason = "you are biggest motherchod";
+	if (!Array.isArray(config.abuse.extraWords)) config.abuse.extraWords = [];
+	if (config.abuse.threadIDs != null && !Array.isArray(config.abuse.threadIDs)) config.abuse.threadIDs = [];
+
 	config.leave = config.leave || {};
 	if (config.leave.enable == null) config.leave.enable = true;
 	if (!config.leave.message) config.leave.message = "%1 left %2. 👋";

@@ -132,7 +132,7 @@ async function autodlDownload(link, trim = true) {
 
 // ---- search APIs on the same toshiro host autodl uses (tiksearch, ani) ----
 
-const searchParams = {}; // endpoint -> the parameter name that worked once
+const searchParams = { [ANI_API]: "keyword" }; // endpoint -> the parameter name that worked (ani is documented: ?keyword=)
 const PAGE_RE = /tiktok\.com\/(@[^/]+\/video\/\d+|t\/)|vm\.tiktok\.com|vt\.tiktok\.com/i;
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif)(\?|$)/i;
 const isHttp = v => typeof v === "string" && /^https?:\/\//i.test(v);
@@ -180,7 +180,8 @@ function toCandidate(item) {
 }
 
 async function searchApi(endpoint, query, tag) {
-	const names = searchParams[endpoint] ? [searchParams[endpoint]] : SEARCH_PARAMS;
+	// the known-good name goes first; the others stay as a fallback in case the API changes
+	const names = searchParams[endpoint] ? [searchParams[endpoint], ...SEARCH_PARAMS.filter(n => n !== searchParams[endpoint])] : SEARCH_PARAMS;
 	let reason = "no results";
 	for (const name of names) {
 		let res;

@@ -120,5 +120,13 @@
       "perThreadGapMs": 700,
       "jitterMs": 150
     }
+  },
+  "abuse": {
+    "enable": true,
+    "warnLimit": 2,
+    "reason": "you are biggest motherchod",
+    "extraWords": [],
+    "threadIDs": [],
+    "notes": "Anyone who swears at the bot (reply to the bot, @tag/name the bot, or a -command) gets warnLimit warnings, then is banned from the bot with this reason. Bot admins are never warned. Add words in extraWords. threadIDs empty = every chat. Reset a person with: -abuse reset <reply|id>."
   }
 }

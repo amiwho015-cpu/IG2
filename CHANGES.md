@@ -21,3 +21,13 @@
 - Needs Node 22+ (Dockerfile moved to node:22; canvas is compiled there). New deps: `mqtt`, `ws`.
 - Things chatkit cannot do natively are routed to a lazily created, never-connected `lib/instagram-chat-api` client with the same cookies: remove member, decline message request, delete thread, @mentions, gif, sticker (nickname falls back to it too).
 - `changeBio` and `changeThreadEmoji` now work in chatkit mode. Still unsupported everywhere: profile picture, sending Instagram music. Media captions are sent as a separate text message.
+
+## Reply photos, edit models, mentions, abuse guard (this build)
+- Fix: replying to a photo now works (edit, pattu add, ...). igAdapter caches media per message and re-reads thread history; replied attachments are typed "photo" in bot.js.
+- anisearch: toshiro `/api/search/ani?keyword=` param tried first.
+- edit: model 14 = gptimg2 (toshiro), 15 = Midjourney. New `edit2` command (default model 14).
+- @mentions resolve from the chat's member list first (goatCompat.enrichMentions); pair/pair2/pair3 accept 1 or 2 tags; frame commands accept reply + 1 tag.
+- New frame commands: crush, soulmate, enemy, bro, date, cheater.
+- Abuse guard (events/onAbuse.js, src/abuseGuard.js, command `abuse`, config.json "abuse"): 2 warnings, then ban with reason "you are biggest motherchod".
+- nix: saves group exchanges and answers from them when the chat API fails.
+- onReaction: emoji matching normalised, 2 attempts.

@@ -3,6 +3,7 @@
 const axios = require("axios");
 const fs = require("fs-extra");
 const nkx = require("../src/nkxClient");
+const tz = require("../src/toshiro");
 
 const API_CONFIG_URL = "https://raw.githubusercontent.com/goatbotnx/xalmanx210/refs/heads/main/apis.json";
 const API_KEY = "xalman-hub";
@@ -41,7 +42,9 @@ const MODELS = [
   { id: 10, name: "SeedDream 5 Edit", tag: "🌱", kind: "nkx", model: "seedream-5-edit", maxImages: 2 },
   { id: 11, name: "Gemini 2.5 Flash Edit", tag: "💎", kind: "nkx", model: "gemini-2-5-flash-image-edit", maxImages: 2 },
   { id: 12, name: "GPT 2.5 Flare Edit", tag: "✨", kind: "nkx", model: "gpt-image-2-5-flare-low-edit", maxImages: 2 },
-  { id: 13, name: "GPT 2.5 Sunburst Edit", tag: "🌅", kind: "nkx", model: "gpt-image-2-5-sunburst-low-edit", maxImages: 2 }
+  { id: 13, name: "GPT 2.5 Sunburst Edit", tag: "🌅", kind: "nkx", model: "gpt-image-2-5-sunburst-low-edit", maxImages: 2 },
+  { id: 14, name: "GPT Image 2 (Toshiro)", tag: "🧠", kind: "toshiro", endpoint: "/api/image/gptimg2", maxImages: 1 },
+  { id: 15, name: "Midjourney Edit", tag: "🎭", kind: "mj", endpoint: "/api/image/mj", maxImages: 1 }
 ];
 
 function buildModelBox() {
@@ -126,6 +129,19 @@ module.exports = {
 
     let filePath;
     try {
+      if (model.kind === "toshiro" || model.kind === "mj") {
+        // Toshiro API models: gptimg2 takes the photo + prompt; Midjourney takes the photo link in front of the prompt.
+        const images = model.kind === "mj"
+          ? await tz.editImages(model.endpoint, `${photos[0]} ${parsed.prompt}`, null, { count: 4, timeout: 300000, mj: true })
+          : await tz.editImages(model.endpoint, parsed.prompt, photos[0], { count: 1, timeout: 240000 });
+        nkx.react(api, messageID, "✅");
+        if (processing && processing.messageID) { try { await api.unsendMessage(processing.messageID); } catch (_) { /* already gone */ } }
+        await message.reply({
+          body: `✨ 𝗜𝗠𝗔𝗚𝗘 𝗘𝗗𝗜𝗧𝗘𝗗 ✨\n━━━━━━━━━━━━━━━━━━━\n${model.tag} ${model.name}\nPrompt: ${parsed.prompt}`,
+          attachment: images.map((im, i) => ({ buffer: im.buffer, fileName: `edit${i + 1}.${im.ext}` }))
+        });
+        return;
+      }
       if (model.kind === "hub") {
         const url = `${await getApiBaseUrl()}/api/edit?img=${encodeURIComponent(photos[0])}&prompt=${encodeURIComponent(parsed.prompt)}`;
         const res = await axios({ method: "GET", url, responseType: "arraybuffer", timeout: 240000 });

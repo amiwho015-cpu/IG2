@@ -18,12 +18,6 @@ function rememberPhotos(event) {
 		.map(a => a.url || a.largePreviewUrl || a.previewUrl)
 		.filter(Boolean);
 	if (!urls.length) return;
-	// Also remember photos by message id and by thread, so a reply to a photo can still find it
-	// (the reply payload often arrives without its attachments).
-	const byMsg = global.__photoByMsg || (global.__photoByMsg = new Map());
-	const rec = { urls, senderID: String(event.senderID || ""), threadID: String(event.threadID || ""), at: Date.now() };
-	if (event.messageID) byMsg.set(String(event.messageID), rec);
-	if (byMsg.size > 1000) byMsg.delete(byMsg.keys().next().value);
 	const store = global.__recentPhotos || (global.__recentPhotos = new Map());
 	const key = `${event.threadID}:${event.senderID}`;
 	const now = Date.now();

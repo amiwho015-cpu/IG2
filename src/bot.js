@@ -98,7 +98,11 @@ function normalizeEvent(event) {
 			messageID: replied.messageID || null,
 			senderID: replied.senderID != null ? String(replied.senderID) : null,
 			body: replied.body != null ? String(replied.body) : "",
-			attachments: Array.isArray(replied.attachments) ? replied.attachments : [],
+			attachments: (Array.isArray(replied.attachments) ? replied.attachments : []).map(att => {
+				if (!att || typeof att !== "object") return att;
+				const type = att.type === "image" ? "photo" : att.type === "gif" ? "animated_image" : att.type;
+				return Object.assign({}, att, { type });
+			}),
 			timestamp: replied.timestamp || null
 		};
 		if (normalized.type === "message") normalized.type = "message_reply";

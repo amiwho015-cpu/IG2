@@ -690,7 +690,8 @@ class ChatkitClient extends EventEmitter {
 			const hist = await this._scanHistory(native, 30);
 			conv.messages = hist.map(m => ({
 				id: this._publicId(m), itemId: m.itemId, senderId: str(m.senderId), text: m.text || "", timestamp: m.timestampMs,
-				replyTo: this._replyOf(m), raw: m.raw
+				replyTo: this._replyOf(m), raw: m.raw,
+				...splitMedia(m.attachments && m.attachments.length ? m.attachments : (m.media ? [m.media] : []))
 			}));
 		}
 		catch (_) { /* thread metadata alone is still useful */ }
