@@ -375,7 +375,11 @@ class ChatkitClient extends EventEmitter {
 				const prevKey = `r:${native}:${d.itemId || d.id}`;
 				const prev = this.seenEvents.get(prevKey) || new Set();
 				const next = new Set();
-				for (const r of d.reactions || []) {
+				let reactionList = Array.isArray(d.reactions) ? d.reactions : [];
+				// Some payloads carry a single reaction instead of the full list.
+				if (!reactionList.length && d.change !== "remove" && (d.emoji || d.reaction) && d.senderId)
+					reactionList = [{ senderId: d.senderId, emoji: d.emoji || d.reaction, timestampMs: d.timestampMs }];
+				for (const r of reactionList) {
 					const k = `${r.senderId}:${r.emoji}`;
 					next.add(k);
 					if (prev.has(k) || d.change === "remove") continue;

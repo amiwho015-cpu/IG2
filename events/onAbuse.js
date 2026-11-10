@@ -30,6 +30,7 @@ function aimedAtBot(event, api, config, body) {
 	if (event.messageReply && event.messageReply.senderID && botID && String(event.messageReply.senderID) === botID) return true;
 	if (config.prefix && body.startsWith(config.prefix)) return true;
 	const low = body.toLowerCase();
+	if (/(^|[^a-z0-9])(bot|nix|বট)([^a-z0-9]|$)/i.test(low)) return true;   // "tui bot ta magi"
 	if (botID && event.mentions && Object.prototype.hasOwnProperty.call(event.mentions, botID)) return true;
 	return botNames(api, config).some(n => new RegExp(`(^|[^a-z0-9])@?${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(low));
 }

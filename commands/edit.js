@@ -137,7 +137,7 @@ module.exports = {
         nkx.react(api, messageID, "✅");
         if (processing && processing.messageID) { try { await api.unsendMessage(processing.messageID); } catch (_) { /* already gone */ } }
         await message.reply({
-          body: `✨ 𝗜𝗠𝗔𝗚𝗘 𝗘𝗗𝗜𝗧𝗘𝗗 ✨\n━━━━━━━━━━━━━━━━━━━\n${model.tag} ${model.name}\nPrompt: ${parsed.prompt}`,
+          body: `✨ 𝗜𝗠𝗔𝗚𝗘 𝗘𝗗𝗜𝗧𝗘𝗗 ✨\n━━━━━━━━━━━━━━━━━━━\n${model.tag} ${model.name}\nPrompt: ${parsed.prompt}${model.kind === "mj" ? "\n⚠️ Midjourney photo edit korte pare na (text theke notun chhobi banay). Asol edit-er jonno --m 14 ba --m 1-13 use koro." : ""}`,
           attachment: images.map((im, i) => ({ buffer: im.buffer, fileName: `edit${i + 1}.${im.ext}` }))
         });
         return;

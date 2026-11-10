@@ -134,7 +134,7 @@ function loadConfig() {
 	// Typing indicator shown before the bot sends anything (toggle: `typingindicator`).
 	config.typingIndicator = config.typingIndicator || {};
 	if (config.typingIndicator.enable == null) config.typingIndicator.enable = true;
-	if (!(Number(config.typingIndicator.duration) > 0)) config.typingIndicator.duration = 1000;
+	if (!(Number(config.typingIndicator.duration) > 0)) config.typingIndicator.duration = 400;
 
 	// Welcome / leave announcements for group threads.
 	config.welcome = config.welcome || {};

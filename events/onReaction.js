@@ -21,6 +21,7 @@ module.exports = {
 		// messages, so reacting to someone else's message is simply ignored.
 		// Compare without variation selectors / skin tones, so "👎🏽" or "🗑️" vs "🗑" all match.
 		const clean = e => String(e || "").replace(/[\uFE0E\uFE0F\u200D]|\uD83C[\uDFFB-\uDFFF]/g, "");
+		log.info("REACTION", `${event.senderID || event.userID} reacted ${event.reaction} on ${event.messageID}`);
 		const REMOVE = ["😡", "😠", "🤬", "👎", "🗑"].map(clean);
 		if (!REMOVE.includes(clean(event.reaction))) return;
 

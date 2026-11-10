@@ -608,7 +608,7 @@ async function login(params) {
 		if (!ref && !msg.isSelf && (looksLikeCommand(msg.text) || plainLookup)) {
 			for (let attempt = 0; attempt < (plainLookup ? 1 : 2) && !ref; attempt++) {
 				try {
-					if (attempt) await sleep(900);
+					if (attempt) await sleep(350);
 					ref = refFromMessage(await readHistory(msg.threadId, msg.id));
 					if (ref) ref.source = "history";
 				}
